@@ -1,0 +1,66 @@
+# Portal do Colaborador
+
+Site para celular em que cada colaborador entra com **CPF e senha** e **só consulta** a própria folha de ponto, os holerites, os avisos e os dados cadastrais. O **RH** entra com e-mail e senha e preenche tudo.
+
+- Banco de dados e logins: [Supabase](https://supabase.com) (plano gratuito).
+- Hospedagem do site: GitHub Pages (gratuito).
+
+## Como funciona o acesso
+
+1. O RH cadastra o colaborador (nome, CPF, cargo, jornada…).
+2. O portal gera um **código de primeiro acesso** de 6 letras ou números. O RH copia a mensagem pronta e manda pelo WhatsApp.
+3. No celular, o colaborador toca em **Primeiro acesso**, digita o CPF e o código e cria a própria senha.
+4. Se a pessoa esquecer a senha, o RH gera um novo código.
+
+Cada colaborador só enxerga os próprios dados. Isso é garantido pelo banco de dados (Row Level Security), não só pela tela.
+
+## Instalação (uma vez só)
+
+### 1. Supabase
+1. Crie um projeto em <https://supabase.com>.
+2. Abra **SQL Editor → New query**, cole todo o conteúdo de `supabase/schema.sql` e clique em **Run**.
+3. Vá em **Authentication → Sign In / Providers → Email** e **desligue “Confirm email”**. O login é por CPF e não há e-mail para confirmar.
+4. Em **Project Settings → API**, copie a **Project URL** e a chave **anon public**.
+
+### 2. Configuração do site
+Abra `config.js` e cole a Project URL e a chave anon public. A chave anon é pública. **Nunca** coloque a chave `service_role` neste arquivo.
+
+### 3. Publicação (GitHub Pages)
+No repositório: **Settings → Pages → Source: Deploy from a branch → Branch: main / (root)**. O endereço fica parecido com `https://SEU-USUARIO.github.io/portal-do-colaborador/`.
+
+### 4. Primeiro acesso do RH
+Abra o site, toque na aba **RH** e em **“Primeira vez? Criar conta do RH”**. Essa opção só funciona uma vez: depois que a conta do RH existe, ninguém mais consegue criar outra por ali.
+
+Em seguida, vá na aba **Empresa** e preencha a razão social, o CNPJ e o logotipo.
+
+## Regras da folha de ponto
+
+- Jornada prevista por dia da semana no cadastro do colaborador (ex.: seg a qui 09:00, sex 08:00).
+- Horas extras e atrasos são calculados por dia. Diferenças de até **10 minutos** no dia são ignoradas (art. 58, §1º da CLT).
+- Extras **50%** de segunda a sexta, **100%** no sábado e **110%** em domingos e feriados.
+- Feriados nacionais entram automaticamente. Feriados locais: marque a ocorrência “Feriado” no dia.
+- As ocorrências “Sem expediente”, “Folga”, “Atestado” e “Férias” zeram a jornada prevista do dia.
+
+## Cálculo do holerite (botão “Calcular holerite pela folha”)
+
+O RH abre o colaborador, toca em **Calcular holerite de <mês> pela folha**, confere e salva. O portal monta:
+
+- **Horas normais**: salário base. Horas do mês pela jornada semanal (44 h → 220 h).
+- **Horas extras** 50%, 100% e 110% a partir da folha, com valor da hora = salário ÷ horas do mês.
+- **DSR sobre extras**: extras ÷ dias úteis × (domingos + feriados do mês).
+- **Atrasos e faltas**: horas × valor da hora (o desconto do DSR por falta não é automático; ajuste à mão se precisar).
+- **INSS** progressivo, **IRRF** (com dependentes, desconto simplificado quando for melhor e a redução de 2026 para quem ganha até R$ 7.350) e **FGTS** de 8% no rodapé.
+- **Ajuda de custo** entra como vencimento sem INSS/IRRF. **Adiantamento** é informado na hora de calcular.
+
+Tabelas de 2026 no `app.js` (constante `PARAM`). Quando o governo mudar as tabelas, é só atualizar ali. Confira sempre o holerite com a sua contabilidade antes de liberar.
+
+## Arquivos
+
+| Arquivo | Para que serve |
+|---|---|
+| `index.html` | Telas e estilo |
+| `app.js` | Funcionamento do portal |
+| `config.js` | Endereço e chave do Supabase, nome e logo da empresa |
+| `logo.jpeg` | Logotipo da Lago Engenharia |
+| `supabase/schema.sql` | Tabelas, permissões e funções do banco |
+| `preview/` | Versão de demonstração com dados fictícios (não usa o Supabase) |
