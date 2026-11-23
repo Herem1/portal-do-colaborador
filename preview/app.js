@@ -1285,7 +1285,7 @@ function resumoColab(c, ref, regs) {
   const {dias, T} = calcularFolha(c, ref, regs);
   const faltas = dias.filter(x => !x.futuro && x.prev && !x.trab && !x.m.length);
   const minFalta = faltas.reduce((a, x) => a + x.atraso, 0), conta = oc => dias.filter(x => x.oc === oc).length;
-  return {T, trabalhados: dias.filter(x => x.trab).length, faltas: faltas.length, minFalta, atraso: T.atraso - minFalta,
+  return {T, datasFalta: faltas.map(x => isoBR(x.iso).slice(0, 5)).join(', '), trabalhados: dias.filter(x => x.trab).length, faltas: faltas.length, minFalta, atraso: T.atraso - minFalta,
     normais: T.trab - T.extra, ocorr: ['Atestado', 'Férias', 'Folga', 'Feriado', 'Sem expediente'].map(o => [o, conta(o)]).filter(([, n]) => n).map(([o, n]) => `${o}: ${n}`).join(' · ')};
 }
 async function baixarResumo(btn) {
@@ -1297,19 +1297,19 @@ async function baixarResumo(btn) {
       const assin = Object.fromEntries(confs.map(c => [c.colaborador_id, c.confirmado_em]));
       const H = m => ({t: 'n', v: (m || 0) / 1440, z: '[h]:mm'});
       const cab = ['Colaborador', 'CPF', 'Cargo', 'Centro de custo', 'Dias trabalhados', 'Horas previstas', 'Horas trabalhadas', 'Horas normais',
-        'Extras 50%', 'Extras 100%', 'Extras 110%', 'Total de extras', 'Atrasos', 'Faltas (dias)', 'Horas de falta',
+        'Extras 50%', 'Extras 100%', 'Extras 110%', 'Total de extras', 'Atrasos', 'Faltas (dias)', 'Horas de falta', 'Dias das faltas',
         'Noturno 20%', 'Noturno 100%', 'Noturno 110%', 'Total noturno', 'Outras ocorrências', 'Folha assinada'];
       const linhas = equipe.filter(c => porColab[c.id]).map(c => {
         const r = resumoColab(c, ref, porColab[c.id]), T = r.T;
         return [c.nome, fmtCPF(c.cpf), c.cargo || '', c.centro_custo || '', r.trabalhados, H(T.prev), H(T.trab), H(r.normais),
-          H(T.e50), H(T.e100), H(T.e110), H(T.extra), H(r.atraso), r.faltas, H(r.minFalta),
+          H(T.e50), H(T.e100), H(T.e110), H(T.extra), H(r.atraso), r.faltas, H(r.minFalta), r.datasFalta,
           H(T.n20), H(T.n100), H(T.n110), H(T.not), r.ocorr, assin[c.id] ? 'Sim · ' + dataHora(assin[c.id]) : 'Não'];
       });
       if (!linhas.length) return toast(`Nenhuma folha lançada em ${refLabel(ref)}.`);
       const soma = k => linhas.reduce((a, l) => a + (typeof l[k] === 'object' ? l[k].v * 1440 : +l[k] || 0), 0);
-      const total = cab.map((_, k) => k === 0 ? 'TOTAL' : k < 4 || k > 18 ? '' : k === 4 || k === 13 ? soma(k) : H(soma(k)));
+      const total = cab.map((_, k) => k === 0 ? 'TOTAL' : k < 4 ? '' : linhas.every(l => typeof l[k] === 'object') ? H(soma(k)) : linhas.every(l => typeof l[k] === 'number') ? soma(k) : '');
       const ws = X.utils.aoa_to_sheet([[`Resumo de horas · ${refLabel(ref)} · ${empresa.nome}`], [], cab, ...linhas, total]);
-      ws['!cols'] = cab.map((h, i) => ({wch: i === 0 ? 32 : i === 19 ? 28 : i === 20 ? 26 : Math.max(11, h.length + 2)}));
+      ws['!cols'] = cab.map((h, i) => ({wch: i === 0 ? 32 : ['Dias das faltas', 'Outras ocorrências', 'Folha assinada'].includes(h) ? 28 : Math.max(11, h.length + 2)}));
       ws['!merges'] = [{s: {r: 0, c: 0}, e: {r: 0, c: 8}}];
       const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Resumo');
       X.writeFile(wb, `resumo-horas-${ref}.xlsx`);
