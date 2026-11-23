@@ -10,5 +10,7 @@ window.PORTAL_CONFIG = {
   NOME_EMPRESA: 'Lago Engenharia',
   LOGO: 'logo.jpeg',   // arquivo do logotipo na mesma pasta (pode trocar na aba Empresa)
   // Domínio usado só internamente para transformar o CPF em login. Não precisa existir.
-  DOMINIO_LOGIN: 'colaborador.portal-rh.app'
+  DOMINIO_LOGIN: 'colaborador.portal-rh.app',
+  // Mês em que o portal começou (aaaa-mm). Antes dele não há ponto automático e não dá para navegar.
+  INICIO: '2026-11'
 };

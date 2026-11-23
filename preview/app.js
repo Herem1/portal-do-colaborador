@@ -87,7 +87,26 @@ async function q(promise) { const {data, error} = await promise; if (error) thro
 let sess = null;          // {tipo:'colab', colab} | {tipo:'rh', email}
 let empresa = {nome: CFG.NOME_EMPRESA || 'Portal do Colaborador', logo: CFG.LOGO || null};
 const comLogoPadrao = e => ({...e, logo: e.logo || CFG.LOGO || null});
-let filtroSit = 'Ativo', filtroObra = '', view = 'inicio', busca = '', cacheEquipe = [], renderTok = 0, mesPonto = null;
+let filtroSit = 'Ativo', filtroObra = '', view = 'inicio', busca = '', cacheEquipe = [], renderTok = 0, mesPonto = null, holTodos = false;
+// Mês de trabalho do RH: vale para Equipe, Holerites, cálculo e resumo (fica salvo no aparelho)
+let mesRH = null;
+// Mês em que o portal começou a ser usado: antes dele não há ponto automático nem navegação
+const INICIO_PORTAL = (window.PORTAL_CONFIG && /^\d{4}-\d{2}$/.test(window.PORTAL_CONFIG.INICIO || '')) ? window.PORTAL_CONFIG.INICIO : '2000-01';
+function mesTrab() {
+  const atual = agoraBR().iso.slice(0, 7);
+  if (!mesRH) { try { mesRH = localStorage.getItem('portal-rh-mes'); } catch (e) {} }
+  if (!/^\d{4}-\d{2}$/.test(mesRH || '') || mesRH > atual) mesRH = atual;
+  if (mesRH < INICIO_PORTAL) mesRH = INICIO_PORTAL;
+  return mesRH;
+}
+function trocarMesRH(v) { if (!/^\d{4}-\d{2}$/.test(v || '')) return; if (v < INICIO_PORTAL) v = INICIO_PORTAL; mesRH = v; try { localStorage.setItem('portal-rh-mes', v); } catch (e) {} render(); }
+function barraMesRH() {
+  const ref = mesTrab(), atual = agoraBR().iso.slice(0, 7);
+  return `<div class="mes-rh"><span class="mes-rh-l">Mês de trabalho</span>
+    <div class="mes-rh-c"><button class="btn btn-ghost btn-sm" aria-label="Mês anterior" onclick="trocarMesRH('${somaMes(ref, -1)}')" ${ref <= INICIO_PORTAL ? 'disabled' : ''}>‹</button>
+    <label class="mes-rh-v">${refLabel(ref)}<input type="month" aria-label="Escolher mês de trabalho" value="${ref}" min="${INICIO_PORTAL}" max="${atual}" onchange="trocarMesRH(this.value)"></label>
+    <button class="btn btn-ghost btn-sm" aria-label="Próximo mês" onclick="trocarMesRH('${somaMes(ref, 1)}')" ${ref >= atual ? 'disabled' : ''}>›</button></div></div>`;
+}
 
 /* =====================================================
    LOGIN
@@ -308,7 +327,7 @@ const desligado = c => c.situacao === 'Desligado';
 const noContrato = (c, iso) => (!c.admissao || iso >= String(c.admissao).slice(0, 10)) && (!c.demissao || iso <= String(c.demissao).slice(0, 10));
 const mesNoContrato = (c, ref) => (!c.admissao || String(c.admissao).slice(0, 10) <= fimDoMes(ref)) && (!c.demissao || String(c.demissao).slice(0, 10) >= ref + '-01');
 // O mês tem folha? (dias lançados ou ponto automático com o colaborador contratado no mês, até hoje)
-const temFolha = (c, ref, regs) => (regs && regs.length > 0) || (pontoAuto(c) && mesNoContrato(c, ref) && ref + '-01' <= agoraBR().iso);
+const temFolha = (c, ref, regs) => (regs && regs.length > 0) || (pontoAuto(c) && ref >= INICIO_PORTAL && mesNoContrato(c, ref) && ref + '-01' <= agoraBR().iso);
 
 function calcularFolha(colab, ref, registros) {
   const [y] = ref.split('-').map(Number), fer = feriadosDoAno(y), hoje = agoraBR().iso;
@@ -319,7 +338,7 @@ function calcularFolha(colab, ref, registros) {
     const iso = `${ref}-${String(d).padStart(2, '0')}`, dw = dataObj(iso).getDay(), r = porDia[iso] || {};
     const fora = !noContrato(colab, iso), lancado = !!porDia[iso];
     let m = (r.marcacoes || []).filter(Boolean), auto = false;
-    if (!lancado && !fora && pontoAuto(colab) && iso <= hoje && !fer[iso] && toMin(jor[dw])) { m = horarioDia(colab, dw); auto = m.length > 0; }
+    if (!lancado && !fora && pontoAuto(colab) && iso <= hoje && iso >= INICIO_PORTAL + '-01' && !fer[iso] && toMin(jor[dw])) { m = horarioDia(colab, dw); auto = m.length > 0; }
     const oc = r.ocorrencia || '', feriado = fer[iso] || (oc === 'Feriado' ? 'Feriado' : '');
     const futuro = iso >= hoje && !m.length;
     const abona = feriado || ['Sem expediente', 'Folga', 'Atestado', 'Férias'].includes(oc);
@@ -575,7 +594,7 @@ async function vInicio() {
 
 function mudarMes(delta) { mesPonto = somaMes(mesPonto, delta); render(); }
 async function vPonto() {
-  const atual = agoraBR().iso.slice(0, 7); if (!mesPonto || mesPonto > atual) mesPonto = atual;
+  const atual = agoraBR().iso.slice(0, 7); if (!mesPonto || mesPonto > atual) mesPonto = atual; if (mesPonto < INICIO_PORTAL) mesPonto = INICIO_PORTAL;
   const c = sess.colab, ref = mesPonto;
   const [regs, conf] = await Promise.all([
     q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', c.id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref))),
@@ -591,7 +610,7 @@ async function vPonto() {
       </div></div>`;
   return `
   <div class="mes-nav">
-    <button class="btn btn-ghost btn-sm" aria-label="Mês anterior" onclick="mudarMes(-1)">‹</button>
+    <button class="btn btn-ghost btn-sm" aria-label="Mês anterior" onclick="mudarMes(-1)" ${ref <= INICIO_PORTAL ? 'style="visibility:hidden"' : ''}>‹</button>
     <div>${refLabel(ref)}</div>
     <button class="btn btn-ghost btn-sm" aria-label="Próximo mês" onclick="mudarMes(1)" ${ref >= atual ? 'style="visibility:hidden"' : ''}>›</button>
   </div>
@@ -700,14 +719,14 @@ const nomeDe = id => (cacheEquipe.find(c => c.id === id) || {}).nome || '—';
 
 let statusOk = {};
 async function vEquipe() {
-  const ant = mesAnterior();
+  const ant = mesTrab();
   const [l, pts, confs] = await Promise.all([carregarEquipe(),
     q(sb.from('pontos').select('colaborador_id').gte('dia', ant + '-01').lte('dia', fimDoMes(ant))),
     q(sb.from('confirmacoes').select('colaborador_id').eq('ref', ant))]);
   const com = new Set(pts.map(p => p.colaborador_id)), ok = new Set(confs.map(c => c.colaborador_id));
   if (filtroObra && !obras().includes(filtroObra)) filtroObra = '';
   statusOk = Object.fromEntries(l.map(c => [c.id, !(com.has(c.id) || temFolha(c, ant, [])) ? '' : ok.has(c.id) ? 'ok' : 'pend']));
-  return `
+  return `${barraMesRH()}
   <div class="row2" style="margin-bottom:10px"><button class="btn btn-ghost" onclick="abrirImportacao()">Importar planilha (Excel)</button><button class="btn btn-ghost" onclick="abrirResumo()">Resumo de horas (Excel)</button></div>
   <div class="filtros"><input class="srch" type="search" placeholder="Buscar por nome, CPF ou cargo" aria-label="Buscar colaborador" value="${esc(busca)}" oninput="busca=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()">
     <select class="srch" aria-label="Filtrar por situação" onchange="filtroSit=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()">${[['Ativo', 'Ativos'], ['Desligado', 'Desligados'], ['', 'Todos']].map(([v, lb]) => `<option value="${v}" ${v === filtroSit ? 'selected' : ''}>${lb} (${l.filter(c => !v || (c.situacao || 'Ativo') === v).length})</option>`).join('')}</select>
@@ -723,13 +742,13 @@ function listaEquipe() {
   const l = cacheEquipe.filter(c => (!filtroSit || (c.situacao || 'Ativo') === filtroSit) && (!filtroObra || (c.obra || '') === filtroObra)).filter(c => !t || c.nome.toLowerCase().includes(t) || (c.cargo || '').toLowerCase().includes(t) || (dq && c.cpf.includes(dq)));
   return l.length ? l.map(c => `<button class="item" onclick="verColab('${c.id}')"><div class="av">${esc(ini(c.nome))}</div>
       <div style="min-width:0;flex:1"><div class="t">${esc(c.nome)}</div><div class="d">${esc(c.cargo || 'Sem cargo')}${c.obra ? ' · ' + esc(c.obra) : ''} · ${fmtCPF(c.cpf)}</div>
-      <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${desligado(c) ? `<span class="tag t-neutral">Desligado${c.demissao ? ' em ' + isoBR(c.demissao) : ''}</span>` : c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${desligado(c) ? '' : statusOk[c.id] === 'ok' ? `<span class="tag t-ok">Folha assinada · ${MESES[+mesAnterior().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? `<span class="tag t-neutral">Folha de ${MESES[+mesAnterior().slice(5) - 1]} sem assinatura</span>` : ''}</div></div>
+      <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${desligado(c) ? `<span class="tag t-neutral">Desligado${c.demissao ? ' em ' + isoBR(c.demissao) : ''}</span>` : c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${desligado(c) ? '' : statusOk[c.id] === 'ok' ? `<span class="tag t-ok">Folha assinada · ${MESES[+mesTrab().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? (mesTrab() >= agoraBR().iso.slice(0, 7) ? `<span class="tag t-neutral">Folha de ${MESES[+mesTrab().slice(5) - 1]} em andamento</span>` : `<span class="tag t-neutral">Folha de ${MESES[+mesTrab().slice(5) - 1]} sem assinatura</span>`) : ''}</div></div>
       <span class="chev">${sv(IC.chev)}</span></button>`).join('')
     : `<div class="empty">${cacheEquipe.length ? 'Ninguém encontrado.' : 'Nenhum colaborador cadastrado ainda.<br>Toque no botão + para adicionar.'}</div>`;
 }
 async function verColab(id, refSel) {
   const c = cacheEquipe.find(x => x.id === id); if (!c) return;
-  const atual = agoraBR().iso.slice(0, 7), ant = mesAnterior(), ref = refSel || ant;
+  const atual = agoraBR().iso.slice(0, 7), ref = refSel || mesTrab();
   sheetCarregando(esc(c.nome));
   try {
     const [hs, confs, cod, as, regs] = await Promise.all([
@@ -760,7 +779,7 @@ async function verColab(id, refSel) {
       </div>
 
       <div class="mes-nav cx-mes">
-        <button class="btn btn-ghost btn-sm" aria-label="Mês anterior" onclick="verColab('${id}','${somaMes(ref, -1)}')">‹</button>
+        <button class="btn btn-ghost btn-sm" aria-label="Mês anterior" onclick="verColab('${id}','${somaMes(ref, -1)}')" ${ref <= INICIO_PORTAL ? 'style="visibility:hidden"' : ''}>‹</button>
         <div>${refLabel(ref)}</div>
         <button class="btn btn-ghost btn-sm" aria-label="Próximo mês" onclick="verColab('${id}','${somaMes(ref, 1)}')" ${ref >= atual ? 'style="visibility:hidden"' : ''}>›</button>
       </div>
@@ -1018,11 +1037,14 @@ async function verFolhaRH(id, ref) {
 async function vRhHol() {
   const [l] = await Promise.all([q(sb.from('holerites').select('id,colaborador_id,ref,itens').order('ref', {ascending:false}).limit(500)), carregarEquipe()]);
   const grupos = {};
-  l.sort((a, b) => b.ref.localeCompare(a.ref) || nomeDe(a.colaborador_id).localeCompare(nomeDe(b.colaborador_id))).forEach(h => (grupos[h.ref] = grupos[h.ref] || []).push(h));
-  return `<div class="stack" style="margin-bottom:14px"><button class="btn btn-primary" onclick="abrirImportacao()">Importar holerites (Excel)</button><button class="btn btn-ghost" onclick="editarHolerite()">${sv(IC.plus, 18)} Lançar holerite à mão</button></div>
+  const mt = mesTrab();
+  l.sort((a, b) => b.ref.localeCompare(a.ref) || nomeDe(a.colaborador_id).localeCompare(nomeDe(b.colaborador_id))).filter(h => holTodos || h.ref === mt).forEach(h => (grupos[h.ref] = grupos[h.ref] || []).push(h));
+  const outros = l.filter(h => h.ref !== mt).length;
+  return `${barraMesRH()}<div class="stack" style="margin-bottom:14px"><button class="btn btn-primary" onclick="abrirImportacao()">Importar holerites (Excel)</button><button class="btn btn-ghost" onclick="editarHolerite()">${sv(IC.plus, 18)} Lançar holerite à mão</button></div>
   ${Object.keys(grupos).length ? Object.keys(grupos).map(ref => `<div class="sec-t">${refLabel(ref)}</div><div class="card">${grupos[ref].map(h => `<button class="item" onclick="editarHolerite(${h.id})">
     <div class="av">${esc(ini(nomeDe(h.colaborador_id)))}</div><div><div class="t">${esc(nomeDe(h.colaborador_id))}</div><div class="d">Líquido ${BRL(totais(h).l)}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('')}</div>`).join('')
-  : '<div class="card"><div class="empty">Nenhum holerite lançado.</div></div>'}`;
+  : `<div class="card"><div class="empty">Nenhum holerite lançado em ${refLabel(mt)}.</div></div>`}
+  ${outros || holTodos ? `<button class="btn btn-ghost" style="margin-top:12px;width:100%" onclick="holTodos=!holTodos;render()">${holTodos ? 'Mostrar só ' + refLabel(mt) : 'Ver holerites de todos os meses (' + outros + ')'}</button>` : ''}`;
 }
 /* =====================================================
    CÁLCULO DA FOLHA DE PAGAMENTO (tabelas de 2026)
@@ -1100,7 +1122,7 @@ function abrirGerador(colabId, ref, hid) {
   if (!(+c.salario)) return toast('Informe o salário base no cadastro do colaborador antes de calcular.');
   sheet('Calcular holerite pela folha', `
     <p class="muted" style="margin-top:0">O portal lê a folha de ponto de <b>${esc(c.nome)}</b> e monta o holerite: horas normais, extras 50%/100%/110%, DSR sobre extras, atrasos e faltas, INSS, IRRF e FGTS (tabelas de ${PARAM.ano}). Depois você confere e salva.</p>
-    <div class="field"><label for="gRef">Mês da folha</label><input id="gRef" type="month" value="${ref || mesAnterior()}"></div>
+    <div class="field"><label for="gRef">Mês da folha</label><input id="gRef" type="month" value="${ref || mesTrab()}"></div>
     <div class="row2">
       <div class="field"><label for="gDep">Dependentes (IRRF)</label><input id="gDep" type="number" min="0" step="1" inputmode="numeric" value="${+c.dependentes || 0}"></div>
       <div class="field"><label for="gAd">Adiantamento já pago (R$)</label><input id="gAd" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00"></div>
@@ -1146,7 +1168,7 @@ async function editarHolerite(hid, colabId) {
   // Holerite anterior serve de modelo (mesmos códigos e descrições)
   let modelo = null;
   if (!h) { try { modelo = (await q(sb.from('holerites').select('itens').eq('colaborador_id', cid).order('ref', {ascending:false}).limit(1)))[0]; } catch (e) {} }
-  rascunho = {id: hid || 0, colabId: cid, ref: h ? h.ref : mesAnterior(), obs: h ? (h.obs || '') : '',
+  rascunho = {id: hid || 0, colabId: cid, ref: h ? h.ref : mesTrab(), obs: h ? (h.obs || '') : '',
     itens: h ? JSON.parse(JSON.stringify(h.itens)) : modelo ? modelo.itens.map(i => ({...i, valor: i.codigo === '1' ? sal : '', ref: i.codigo === '1' ? i.ref : ''})) : ITENS_PADRAO(sal),
     rodape: h ? {...(h.rodape || {})} : {salario_base: sal}};
   desenharHolerite();
@@ -1368,7 +1390,7 @@ async function baixarModelo() {
 /* ---- Resumo de horas do mês, um colaborador por linha (Excel) ---- */
 function abrirResumo() {
   sheet('Resumo de horas', `<p class="muted" style="margin-top:0">Baixa uma planilha com uma linha por colaborador: horas normais, extras 50%, 100% e 110%, atrasos, faltas e adicional noturno do mês.</p>
-    <div class="field"><label for="rRef">Mês</label><input id="rRef" type="month" value="${mesAnterior()}"></div>
+    <div class="field"><label for="rRef">Mês</label><input id="rRef" type="month" value="${mesTrab()}"></div>
     ${obras().length ? `<div class="field"><label for="rObra">Obra</label><select id="rObra"><option value="">Todas as obras</option>${obras().map(o => `<option ${o === filtroObra ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>` : ''}`,
     [['Fechar', 'ghost', 'fecharSheet()'], ['Baixar Excel', 'primary', 'baixarResumo(this)']]);
 }
