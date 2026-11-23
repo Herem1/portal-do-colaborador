@@ -294,7 +294,7 @@ function calcularFolha(colab, ref, registros) {
   const [y] = ref.split('-').map(Number), fer = feriadosDoAno(y), hoje = agoraBR().iso;
   const porDia = Object.fromEntries((registros || []).map(r => [String(r.dia).slice(0, 10), r]));
   const jor = colab.jornada && colab.jornada.length === 7 ? colab.jornada : ['', '09:00', '09:00', '09:00', '09:00', '08:00', ''];
-  const dias = [], T = {trab:0, prev:0, extra:0, atraso:0, e50:0, e100:0, e110:0, not:0};
+  const dias = [], T = {trab:0, prev:0, extra:0, atraso:0, e50:0, e100:0, e110:0, not:0, n20:0, n100:0, n110:0};
   for (let d = 1; d <= diasNoMes(ref); d++) {
     const iso = `${ref}-${String(d).padStart(2, '0')}`, dw = dataObj(iso).getDay(), r = porDia[iso] || {};
     const m = (r.marcacoes || []).filter(Boolean), oc = r.ocorrencia || '', feriado = fer[iso] || (oc === 'Feriado' ? 'Feriado' : '');
@@ -311,6 +311,7 @@ function calcularFolha(colab, ref, registros) {
     }
     const faixa = feriado || dw === 0 ? 110 : dw === 6 ? 100 : 50;
     if (extra) T['e' + faixa] += extra;
+    if (not) T['n' + (faixa === 50 ? 20 : faixa)] += not;
     T.trab += trab; T.not += not; T.prev += prev; T.extra += extra; T.atraso += atraso;
     dias.push({iso, d, dw, m, not, oc: oc || (fer[iso] ? '' : ''), feriado, obs: r.observacao || '', trab, prev, extra, atraso, futuro,
       cinza: dw === 0 || dw === 6 || !!feriado});
@@ -394,14 +395,14 @@ function folhaHTML(colab, ref, registros, conf) {
       ${(() => {
         const vh = valorHora(colab), V = vh > 0, {uteis, rep} = diasDSR(ref);
         const v50 = r2(T.e50 / 60 * vh * 1.5), v100 = r2(T.e100 / 60 * vh * 2), v110 = r2(T.e110 / 60 * vh * 2.1);
-        const vnot = r2(T.not / HORA_NOTURNA * vh * 0.2);
+        const vnot = [20, 100, 110].reduce((a, k) => a + r2(T['n' + k] / HORA_NOTURNA * vh * k / 100), 0);
         const dsr = uteis ? r2((v50 + v100 + v110 + vnot) / uteis * rep) : 0, vat = r2(T.atraso / 60 * vh), liq = v50 + v100 + v110 + vnot + dsr - vat;
         const c = x => V ? `<td class="n">${x ? BRL(x) : '-'}</td>` : '';
         return `<table class="mini"><thead><tr><th style="text-align:left">Descrição</th><th>Horas</th><th>Adicional</th>${V ? '<th>Valor</th>' : ''}</tr></thead><tbody>
         <tr><td>Extras 50% (segunda a sexta)</td><td class="n">${hmOu(T.e50)}</td><td class="g">50%</td>${c(v50)}</tr>
         <tr><td>Extras 100% (sábado)</td><td class="n">${hmOu(T.e100)}</td><td class="g">100%</td>${c(v100)}</tr>
         <tr><td>Extras 110% (domingo e feriado)</td><td class="n">${hmOu(T.e110)}</td><td class="g">110%</td>${c(v110)}</tr>
-        ${T.not ? `<tr><td>Adicional noturno (22h às 5h · hora de 52min30s)</td><td class="n">${hm(T.not)}</td><td class="g">20%</td>${c(vnot)}</tr>` : ''}
+        ${[[20, 'segunda a sexta'], [100, 'sábado'], [110, 'domingo e feriado']].filter(([k]) => T['n' + k]).map(([k, lb]) => `<tr><td>Adicional noturno ${k}% (${lb} · 22h às 5h)</td><td class="n">${hm(T['n' + k])}</td><td class="g">${k}%</td>${c(r2(T['n' + k] / HORA_NOTURNA * vh * k / 100))}</tr>`).join('')}
         ${V ? `<tr><td>DSR sobre extras e noturno (${rep} repousos / ${uteis} dias úteis)</td><td></td><td></td>${c(dsr)}</tr>` : ''}
         <tr><td>Desconto de atrasos / faltas</td><td class="n">${hmOu(T.atraso)}</td><td></td>${V ? `<td class="n">${vat ? '−' + BRL(vat) : '-'}</td>` : ''}</tr>
         <tr><td>Ajuda de custo (mensal)</td><td class="n" colspan="${V ? 3 : 2}">${ajuda ? BRL(ajuda) : '-'}</td></tr>
@@ -979,8 +980,8 @@ function gerarHolerite(colab, ref, registros, op = {}) {
   P('201', 'HORAS EXTRAS 50%', dec(h(T.e50)), e50);
   P('200', 'HORAS EXTRAS 100%', dec(h(T.e100)), e100);
   P('205', 'HORAS EXTRAS 110%', dec(h(T.e110)), e110);
-  const hnot = T.not / HORA_NOTURNA, vnot = hnot * vh * 0.2;
-  P('25', 'ADICIONAL NOTURNO 20%', dec(hnot), vnot);
+  let vnot = 0;
+  for (const [k, cod] of [[20, '25'], [100, '26'], [110, '27']]) { const hn = T['n' + k] / HORA_NOTURNA, v = r2(hn * vh * k / 100); vnot += v; P(cod, `ADICIONAL NOTURNO ${k}%`, dec(hn), v); }
   const {uteis, rep} = diasDSR(ref), he = r2(e50) + r2(e100) + r2(e110) + r2(vnot);
   const dsr = uteis ? he / uteis * rep : 0;
   P('250', T.not ? 'REFLEXO EXTRAS/NOTURNO DSR' : 'REFLEXO EXTRAS DSR', `${rep}/${uteis}`, dsr);

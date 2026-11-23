@@ -44,7 +44,7 @@ Quem já tinha instalado o portal antes dessa função precisa rodar `supabase/a
 - Jornada prevista por dia da semana no cadastro do colaborador (ex.: seg a qui 09:00, sex 08:00).
 - Horas extras e atrasos são calculados por dia. Diferenças de até **10 minutos** no dia são ignoradas (art. 58, §1º da CLT).
 - Extras **50%** de segunda a sexta, **100%** no sábado e **110%** em domingos e feriados.
-- Turnos que passam da meia-noite são aceitos (ex.: entrada 22:00 e saída 06:00). As horas entre 22h e 5h aparecem como **noturnas** e o cálculo do holerite inclui o **adicional noturno de 20%** com hora reduzida de 52min30s (o RH pode apagar a linha se não se aplicar).
+- Turnos que passam da meia-noite são aceitos (ex.: entrada 22:00 e saída 06:00). As horas entre 22h e 5h aparecem como **noturnas** e o cálculo do holerite inclui o **adicional noturno** com hora reduzida de 52min30s: **20%** de segunda a sexta, **100%** no sábado e **110%** em domingos e feriados. No holerite, o RH pode incluir ou apagar qualquer provento ou desconto antes de salvar.
 - Feriados nacionais entram automaticamente. Feriados locais: marque a ocorrência “Feriado” no dia.
 - As ocorrências “Sem expediente”, “Folga”, “Atestado” e “Férias” zeram a jornada prevista do dia.
 
