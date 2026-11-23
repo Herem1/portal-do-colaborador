@@ -308,7 +308,7 @@ const desligado = c => c.situacao === 'Desligado';
 const noContrato = (c, iso) => (!c.admissao || iso >= String(c.admissao).slice(0, 10)) && (!c.demissao || iso <= String(c.demissao).slice(0, 10));
 const mesNoContrato = (c, ref) => (!c.admissao || String(c.admissao).slice(0, 10) <= fimDoMes(ref)) && (!c.demissao || String(c.demissao).slice(0, 10) >= ref + '-01');
 // O mês tem folha? (dias lançados ou ponto automático com o colaborador contratado no mês, até hoje)
-const temFolha = (c, ref, regs) => (regs && regs.length > 0) || (pontoAuto(c) && mesNoContrato(c, ref) && ref + '-01' < agoraBR().iso);
+const temFolha = (c, ref, regs) => (regs && regs.length > 0) || (pontoAuto(c) && mesNoContrato(c, ref) && ref + '-01' <= agoraBR().iso);
 
 function calcularFolha(colab, ref, registros) {
   const [y] = ref.split('-').map(Number), fer = feriadosDoAno(y), hoje = agoraBR().iso;
@@ -319,7 +319,7 @@ function calcularFolha(colab, ref, registros) {
     const iso = `${ref}-${String(d).padStart(2, '0')}`, dw = dataObj(iso).getDay(), r = porDia[iso] || {};
     const fora = !noContrato(colab, iso), lancado = !!porDia[iso];
     let m = (r.marcacoes || []).filter(Boolean), auto = false;
-    if (!lancado && !fora && pontoAuto(colab) && iso < hoje && !fer[iso] && toMin(jor[dw])) { m = horarioDia(colab, dw); auto = m.length > 0; }
+    if (!lancado && !fora && pontoAuto(colab) && iso <= hoje && !fer[iso] && toMin(jor[dw])) { m = horarioDia(colab, dw); auto = m.length > 0; }
     const oc = r.ocorrencia || '', feriado = fer[iso] || (oc === 'Feriado' ? 'Feriado' : '');
     const futuro = iso >= hoje && !m.length;
     const abona = feriado || ['Sem expediente', 'Folga', 'Atestado', 'Férias'].includes(oc);
