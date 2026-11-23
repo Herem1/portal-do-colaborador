@@ -3,7 +3,7 @@
    Usado só na página de demonstração. O site real usa o Supabase.
    ===================================================== */
 (function () {
-  const LS = 'portal-colab-previa-v6';
+  const LS = 'portal-colab-previa-v7';
   const uid = () => 'u' + Math.random().toString(16).slice(2, 10) + '-0000-0000-0000-000000000000';
   const pad = n => String(n).padStart(2, '0');
   const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -19,9 +19,9 @@
     DB.colaboradores.push(
       {id: 'c1', user_id: maria.id, nome: 'Maria da Silva Exemplo', cpf: '11111111111', codigo: '30', cargo: 'Pedreira', cbo: '715210', departamento: '2', filial: '1',
        centro_custo: 'CT0001', lotacao: 'Operacional', tipo_salario: 'Mensalista', admissao: '2025-06-08', email: 'maria@exemplo.com', tel: '(00) 90000-0000',
-       salario: 2800, ajuda_custo: 0, dependentes: 1, banco: 'Banco Exemplo · Ag 0001 · CC 12345-6', jornada: jor, codigo_acesso: null},
+       salario: 2800, ajuda_custo: 0, dependentes: 1, obra: 'Residencial Lago Azul', banco: 'Banco Exemplo · Ag 0001 · CC 12345-6', jornada: jor, codigo_acesso: null},
       {id: 'c2', user_id: null, nome: 'João Pereira Exemplo', cpf: '22222222222', codigo: '31', cargo: 'Servente', cbo: '717020', departamento: '2', filial: '1',
-       centro_custo: 'CT0001', lotacao: 'Operacional', tipo_salario: 'Mensalista', admissao: '2026-02-01', email: '', tel: '', salario: 1900, ajuda_custo: 150, dependentes: 0,
+       centro_custo: 'CT0001', lotacao: 'Operacional', tipo_salario: 'Mensalista', admissao: '2026-02-01', email: '', tel: '', salario: 1900, ajuda_custo: 150, dependentes: 0, obra: 'Galpão Industrial Norte',
        banco: '', jornada: jor, codigo_acesso: 'ABC123'}
     );
     // ponto: mês passado inteiro + mês atual até ontem

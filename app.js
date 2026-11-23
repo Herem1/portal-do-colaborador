@@ -80,14 +80,14 @@ function imprimir() { try { window.print(); } catch (e) { toast('Não foi possí
 /* ---------- Supabase ---------- */
 const configurado = CFG.SUPABASE_URL && /^https:\/\//.test(CFG.SUPABASE_URL) && CFG.SUPABASE_ANON_KEY && !/COLE_AQUI/.test(CFG.SUPABASE_ANON_KEY);
 const sb = configurado ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {auth:{persistSession:true, autoRefreshToken:true}}) : null;
-const COLS = 'id,user_id,nome,cpf,codigo,cargo,cbo,departamento,filial,centro_custo,lotacao,tipo_salario,admissao,email,tel,salario,ajuda_custo,dependentes,banco,jornada';
+const COLS = 'id,user_id,nome,cpf,codigo,cargo,cbo,departamento,filial,centro_custo,lotacao,tipo_salario,admissao,email,tel,salario,ajuda_custo,dependentes,banco,jornada,obra';
 async function q(promise) { const {data, error} = await promise; if (error) throw error; return data; }
 
 /* ---------- estado ---------- */
 let sess = null;          // {tipo:'colab', colab} | {tipo:'rh', email}
 let empresa = {nome: CFG.NOME_EMPRESA || 'Portal do Colaborador', logo: CFG.LOGO || null};
 const comLogoPadrao = e => ({...e, logo: e.logo || CFG.LOGO || null});
-let view = 'inicio', busca = '', cacheEquipe = [], renderTok = 0, mesPonto = null;
+let filtroObra = '', view = 'inicio', busca = '', cacheEquipe = [], renderTok = 0, mesPonto = null;
 
 /* =====================================================
    LOGIN
@@ -380,7 +380,7 @@ function folhaHTML(colab, ref, registros, conf) {
     <div class="fp-id">
       <div class="nm">${esc(colab.nome)}</div>
       <div class="muted">${esc(colab.cargo || '')}${colab.cargo ? ' · ' : ''}CPF ${fmtCPF(colab.cpf)}</div>
-      <div class="muted">${esc(empresa.nome)}${colab.centro_custo ? ' · Centro de custo ' + esc(colab.centro_custo) : ''}</div>
+      <div class="muted">${esc(empresa.nome)}${colab.obra ? ' · Obra ' + esc(colab.obra) : ''}${colab.centro_custo ? ' · Centro de custo ' + esc(colab.centro_custo) : ''}</div>
     </div>
     <div class="fp-kpi">
       <div><small>Trabalhadas</small><b>${hm(T.trab)}</b></div>
@@ -629,7 +629,7 @@ async function vPerfil() {
     ${kv('Nome', c.nome)}${kv('CPF', fmtCPF(c.cpf))}${kv('E-mail', c.email)}${kv('Telefone', c.tel)}
   </div></div>
   <div class="card"><div class="card-h"><h3>Trabalho</h3></div><div class="card-b">
-    ${kv('Empresa', empresa.nome)}${kv('Cargo', c.cargo)}${kv('Código', c.codigo)}${kv('Departamento', c.departamento)}${kv('Centro de custo', c.centro_custo)}${kv('Admissão', isoBR(c.admissao))}
+    ${kv('Empresa', empresa.nome)}${kv('Cargo', c.cargo)}${kv('Código', c.codigo)}${kv('Departamento', c.departamento)}${c.obra ? kv('Obra', c.obra) : ''}${kv('Centro de custo', c.centro_custo)}${kv('Admissão', isoBR(c.admissao))}
     ${kv('Jornada', jornadaTexto(c.jornada))}
   </div></div>
   <div class="card"><div class="card-h"><h3>Pagamento</h3></div><div class="card-b">
@@ -676,19 +676,23 @@ async function vEquipe() {
     q(sb.from('pontos').select('colaborador_id').gte('dia', ant + '-01').lte('dia', fimDoMes(ant))),
     q(sb.from('confirmacoes').select('colaborador_id').eq('ref', ant))]);
   const com = new Set(pts.map(p => p.colaborador_id)), ok = new Set(confs.map(c => c.colaborador_id));
+  if (filtroObra && !obras().includes(filtroObra)) filtroObra = '';
   statusOk = Object.fromEntries(l.map(c => [c.id, !com.has(c.id) ? '' : ok.has(c.id) ? 'ok' : 'pend']));
   return `
   <div class="row2" style="margin-bottom:10px"><button class="btn btn-ghost" onclick="abrirImportacao()">Importar planilha (Excel)</button><button class="btn btn-ghost" onclick="abrirResumo()">Resumo de horas (Excel)</button></div>
-  <input class="srch" type="search" placeholder="Buscar por nome, CPF ou cargo" aria-label="Buscar colaborador" value="${esc(busca)}" oninput="busca=this.value;$('lista').innerHTML=listaEquipe()">
-  <div class="sec-t">${l.length} colaborador${l.length === 1 ? '' : 'es'}</div>
+  <div class="filtros"><input class="srch" type="search" placeholder="Buscar por nome, CPF ou cargo" aria-label="Buscar colaborador" value="${esc(busca)}" oninput="busca=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()">
+    ${obras().length ? `<select class="srch" aria-label="Filtrar por obra" onchange="filtroObra=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()"><option value="">Todas as obras</option>${obras().map(o => `<option ${o === filtroObra ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>` : ''}</div>
+  <div class="sec-t" id="contEq">${l.length} colaborador${l.length === 1 ? '' : 'es'}</div>
   <div class="card" id="lista">${listaEquipe()}</div>
   <button class="fab" aria-label="Adicionar colaborador" onclick="editarColab()">${sv(IC.plus, 24)}</button>`;
 }
+const obras = () => [...new Set(cacheEquipe.map(c => (c.obra || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+function contarEquipe() { const n = document.querySelectorAll('#lista .item').length, e = $('contEq'); if (e) e.textContent = `${n} colaborador${n === 1 ? '' : 'es'}${filtroObra ? ' · ' + filtroObra : ''}`; }
 function listaEquipe() {
   const t = busca.toLowerCase().trim(), dq = soDig(busca);
-  const l = cacheEquipe.filter(c => !t || c.nome.toLowerCase().includes(t) || (c.cargo || '').toLowerCase().includes(t) || (dq && c.cpf.includes(dq)));
+  const l = cacheEquipe.filter(c => !filtroObra || (c.obra || '') === filtroObra).filter(c => !t || c.nome.toLowerCase().includes(t) || (c.cargo || '').toLowerCase().includes(t) || (dq && c.cpf.includes(dq)));
   return l.length ? l.map(c => `<button class="item" onclick="verColab('${c.id}')"><div class="av">${esc(ini(c.nome))}</div>
-      <div style="min-width:0;flex:1"><div class="t">${esc(c.nome)}</div><div class="d">${esc(c.cargo || 'Sem cargo')} · ${fmtCPF(c.cpf)}</div>
+      <div style="min-width:0;flex:1"><div class="t">${esc(c.nome)}</div><div class="d">${esc(c.cargo || 'Sem cargo')}${c.obra ? ' · ' + esc(c.obra) : ''} · ${fmtCPF(c.cpf)}</div>
       <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${statusOk[c.id] === 'ok' ? `<span class="tag t-ok">Folha assinada · ${MESES[+mesAnterior().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? `<span class="tag t-neutral">Folha de ${MESES[+mesAnterior().slice(5) - 1]} sem assinatura</span>` : ''}</div></div>
       <span class="chev">${sv(IC.chev)}</span></button>`).join('')
     : `<div class="empty">${cacheEquipe.length ? 'Ninguém encontrado.' : 'Nenhum colaborador cadastrado ainda.<br>Toque no botão + para adicionar.'}</div>`;
@@ -720,7 +724,7 @@ async function verColab(id, refSel) {
         <div style="min-width:0">
           <div class="cx-nome">${esc(c.nome)}</div>
           <div class="muted">${esc(c.cargo || 'Sem cargo')}${c.departamento ? ' · ' + esc(c.departamento) : ''} · CPF ${fmtCPF(c.cpf)}</div>
-          <div class="cx-tags">${c.user_id ? '<span class="tag t-ok">Acesso ativo</span>' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${c.admissao ? `<span class="tag t-neutral">Admissão ${isoBR(c.admissao)}</span>` : ''}</div>
+          <div class="cx-tags">${c.user_id ? '<span class="tag t-ok">Acesso ativo</span>' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${c.obra ? `<span class="tag t-info">Obra: ${esc(c.obra)}</span>` : ''}${c.admissao ? `<span class="tag t-neutral">Admissão ${isoBR(c.admissao)}</span>` : ''}</div>
         </div>
         <button class="btn btn-ghost btn-sm cx-edit" onclick="editarColab('${id}')">Editar dados</button>
       </div>
@@ -806,6 +810,7 @@ function editarColab(id) {
     <div class="row2">${f('cpf', 'CPF *', 'text', `inputmode="numeric" oninput="this.value=fmtCPF(this.value)" ${id ? 'readonly style="background:#f4f6fa"' : ''}`)}${f('codigo', 'Código (holerite)')}</div>
     <div class="row2">${f('cargo', 'Cargo')}${f('cbo', 'CBO', 'text', 'inputmode="numeric"')}</div>
     <div class="row2">${f('departamento', 'Departamento')}${f('filial', 'Filial')}</div>
+    <div class="field"><label for="f_obra">Obra</label><input id="f_obra" list="listaObras" value="${esc(c.obra || '')}" placeholder="Ex.: Residencial Lago Azul"><datalist id="listaObras">${obras().map(o => `<option value="${esc(o)}">`).join('')}</datalist></div>
     <div class="row2">${f('centro_custo', 'Centro de custo (folha)')}${f('lotacao', 'CC do holerite')}</div>
     <div class="row2">${f('admissao', 'Admissão', 'date')}<div class="field"><label for="f_tipo_salario">Tipo</label><select id="f_tipo_salario">${['Mensalista', 'Horista', 'Diarista'].map(o => `<option ${o === c.tipo_salario ? 'selected' : ''}>${o}</option>`).join('')}</select></div></div>
     <div class="field"><label>Jornada prevista por dia (deixe vazio nos dias sem expediente)</label>
@@ -829,7 +834,7 @@ async function salvarColab(id, btn) {
   const jornada = DIAS.map((_, i) => normHora($('j' + i).value));
   if (jornada.some(x => x === null)) return erro('Jornada: use o formato 09:00 em cada dia.');
   const o = k => v(k) || null;
-  const dados = {nome: v('nome'), codigo: o('codigo'), cargo: o('cargo'), cbo: o('cbo'), departamento: o('departamento'), filial: o('filial'), centro_custo: o('centro_custo'), lotacao: o('lotacao'),
+  const dados = {nome: v('nome'), codigo: o('codigo'), cargo: o('cargo'), cbo: o('cbo'), departamento: o('departamento'), filial: o('filial'), centro_custo: o('centro_custo'), lotacao: o('lotacao'), obra: o('obra'),
     tipo_salario: v('tipo_salario'), admissao: o('admissao'), jornada, email: o('email'), tel: o('tel'), salario: +v('salario') || 0, ajuda_custo: +v('ajuda_custo') || 0, dependentes: Math.max(0, Math.round(+v('dependentes') || 0)), banco: o('banco')};
   await comBotao(btn, async () => {
     try {
@@ -1268,7 +1273,7 @@ function carregarXLSX() {
   });
 }
 const ABAS = {
-  colab: ['CPF', 'Nome', 'Código', 'Cargo', 'CBO', 'Departamento', 'Filial', 'Centro de custo', 'CC holerite', 'Tipo', 'Admissão', 'Salário', 'Ajuda de custo', 'Dependentes', 'E-mail', 'Telefone', 'Banco', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'],
+  colab: ['CPF', 'Nome', 'Código', 'Cargo', 'Obra', 'CBO', 'Departamento', 'Filial', 'Centro de custo', 'CC holerite', 'Tipo', 'Admissão', 'Salário', 'Ajuda de custo', 'Dependentes', 'E-mail', 'Telefone', 'Banco', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'],
   ponto: ['CPF', 'Data', 'Entrada', 'Saída almoço', 'Retorno almoço', 'Saída', 'Ocorrência', 'Observação'],
   hol: ['CPF', 'Mês', 'Código', 'Descrição', 'Referência', 'Vencimento', 'Desconto'],
   bases: ['CPF', 'Mês', 'Salário base', 'Sal. contr. INSS', 'Base cálc. FGTS', 'FGTS do mês', 'Base cálc. IRRF', 'Faixa IRRF']
@@ -1290,8 +1295,8 @@ function modeloPlanilha() {
       ['', 'Importar de novo o mesmo CPF e mês substitui o holerite inteiro.'],
       ['Bases holerite', 'Opcional: rodapé do holerite (uma linha por CPF e mês).']],
     Colaboradores: [ABAS.colab,
-      ['111.111.111-11', 'Maria da Silva Exemplo', '30', 'Pedreira', '715210', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '08/06/2025', '2800,00', '0', '1', 'maria@exemplo.com', '(00) 90000-0000', 'Banco 001 Ag 0001 CC 12345-6', '09:00', '09:00', '09:00', '09:00', '08:00', '', ''],
-      ['222.222.222-22', 'João Pereira Exemplo', '31', 'Servente', '717020', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '01/02/2026', '1900,00', '150,00', '0', '', '', '', '09:00', '09:00', '09:00', '09:00', '08:00', '', '']],
+      ['111.111.111-11', 'Maria da Silva Exemplo', '30', 'Pedreira', 'Obra Centro', '715210', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '08/06/2025', '2800,00', '0', '1', 'maria@exemplo.com', '(00) 90000-0000', 'Banco 001 Ag 0001 CC 12345-6', '09:00', '09:00', '09:00', '09:00', '08:00', '', ''],
+      ['222.222.222-22', 'João Pereira Exemplo', '31', 'Servente', 'Obra Centro', '717020', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '01/02/2026', '1900,00', '150,00', '0', '', '', '', '09:00', '09:00', '09:00', '09:00', '08:00', '', '']],
     Ponto: [ABAS.ponto,
       ['111.111.111-11', d(1), '06:58', '11:40', '12:42', '16:58', '', ''],
       ['111.111.111-11', d(2), '07:00', '11:40', '12:40', '19:01', '', 'Efetivo até 19h'],
@@ -1315,7 +1320,8 @@ async function baixarModelo() {
 /* ---- Resumo de horas do mês, um colaborador por linha (Excel) ---- */
 function abrirResumo() {
   sheet('Resumo de horas', `<p class="muted" style="margin-top:0">Baixa uma planilha com uma linha por colaborador: horas normais, extras 50%, 100% e 110%, atrasos, faltas e adicional noturno do mês.</p>
-    <div class="field"><label for="rRef">Mês</label><input id="rRef" type="month" value="${mesAnterior()}"></div>`,
+    <div class="field"><label for="rRef">Mês</label><input id="rRef" type="month" value="${mesAnterior()}"></div>
+    ${obras().length ? `<div class="field"><label for="rObra">Obra</label><select id="rObra"><option value="">Todas as obras</option>${obras().map(o => `<option ${o === filtroObra ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>` : ''}`,
     [['Fechar', 'ghost', 'fecharSheet()'], ['Baixar Excel', 'primary', 'baixarResumo(this)']]);
 }
 async function pontosDoMes(ref) {
@@ -1333,30 +1339,30 @@ function resumoColab(c, ref, regs) {
     normais: T.trab - T.extra, ocorr: ['Atestado', 'Férias', 'Folga', 'Feriado', 'Sem expediente'].map(o => [o, conta(o)]).filter(([, n]) => n).map(([o, n]) => `${o}: ${n}`).join(' · ')};
 }
 async function baixarResumo(btn) {
-  const ref = $('rRef').value; if (!ref) return toast('Escolha o mês.');
+  const ref = $('rRef').value, obraSel = $('rObra') ? $('rObra').value : ''; if (!ref) return toast('Escolha o mês.');
   await comBotao(btn, async () => {
     try {
       const [X, equipe, regs, confs] = await Promise.all([carregarXLSX(), carregarEquipe(), pontosDoMes(ref), q(sb.from('confirmacoes').select('colaborador_id,confirmado_em').eq('ref', ref))]);
       const porColab = {}; regs.forEach(r => (porColab[r.colaborador_id] = porColab[r.colaborador_id] || []).push(r));
       const assin = Object.fromEntries(confs.map(c => [c.colaborador_id, c.confirmado_em]));
       const H = m => ({t: 'n', v: (m || 0) / 1440, z: '[h]:mm'});
-      const cab = ['Colaborador', 'CPF', 'Cargo', 'Centro de custo', 'Dias trabalhados', 'Horas previstas', 'Horas trabalhadas', 'Horas normais',
+      const cab = ['Colaborador', 'CPF', 'Cargo', 'Obra', 'Centro de custo', 'Dias trabalhados', 'Horas previstas', 'Horas trabalhadas', 'Horas normais',
         'Extras 50%', 'Extras 100%', 'Extras 110%', 'Total de extras', 'Atrasos', 'Faltas (dias)', 'Horas de falta', 'Dias das faltas',
         'Noturno 20%', 'Noturno 100%', 'Noturno 110%', 'Total noturno', 'Outras ocorrências', 'Folha assinada'];
-      const linhas = equipe.filter(c => porColab[c.id]).map(c => {
+      const linhas = equipe.filter(c => porColab[c.id] && (!obraSel || (c.obra || '') === obraSel)).sort((a, b) => (a.obra || '').localeCompare(b.obra || '') || a.nome.localeCompare(b.nome)).map(c => {
         const r = resumoColab(c, ref, porColab[c.id]), T = r.T;
-        return [c.nome, fmtCPF(c.cpf), c.cargo || '', c.centro_custo || '', r.trabalhados, H(T.prev), H(T.trab), H(r.normais),
+        return [c.nome, fmtCPF(c.cpf), c.cargo || '', c.obra || '', c.centro_custo || '', r.trabalhados, H(T.prev), H(T.trab), H(r.normais),
           H(T.e50), H(T.e100), H(T.e110), H(T.extra), H(r.atraso), r.faltas, H(r.minFalta), r.datasFalta,
           H(T.n20), H(T.n100), H(T.n110), H(T.not), r.ocorr, assin[c.id] ? 'Sim · ' + dataHora(assin[c.id]) : 'Não'];
       });
-      if (!linhas.length) return toast(`Nenhuma folha lançada em ${refLabel(ref)}.`);
+      if (!linhas.length) return toast(`Nenhuma folha lançada em ${refLabel(ref)}${obraSel ? ' na obra ' + obraSel : ''}.`);
       const soma = k => linhas.reduce((a, l) => a + (typeof l[k] === 'object' ? l[k].v * 1440 : +l[k] || 0), 0);
-      const total = cab.map((_, k) => k === 0 ? 'TOTAL' : k < 4 ? '' : linhas.every(l => typeof l[k] === 'object') ? H(soma(k)) : linhas.every(l => typeof l[k] === 'number') ? soma(k) : '');
-      const ws = X.utils.aoa_to_sheet([[`Resumo de horas · ${refLabel(ref)} · ${empresa.nome}`], [], cab, ...linhas, total]);
-      ws['!cols'] = cab.map((h, i) => ({wch: i === 0 ? 32 : ['Dias das faltas', 'Outras ocorrências', 'Folha assinada'].includes(h) ? 28 : Math.max(11, h.length + 2)}));
+      const total = cab.map((_, k) => k === 0 ? 'TOTAL' : k < 5 ? '' : linhas.every(l => typeof l[k] === 'object') ? H(soma(k)) : linhas.every(l => typeof l[k] === 'number') ? soma(k) : '');
+      const ws = X.utils.aoa_to_sheet([[`Resumo de horas · ${refLabel(ref)} · ${empresa.nome}${obraSel ? ' · Obra ' + obraSel : ''}`], [], cab, ...linhas, total]);
+      ws['!cols'] = cab.map((h, i) => ({wch: i === 0 ? 32 : ['Dias das faltas', 'Outras ocorrências', 'Folha assinada', 'Obra'].includes(h) ? 24 : Math.max(11, h.length + 2)}));
       ws['!merges'] = [{s: {r: 0, c: 0}, e: {r: 0, c: 8}}];
       const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Resumo');
-      X.writeFile(wb, `resumo-horas-${ref}.xlsx`);
+      X.writeFile(wb, `resumo-horas-${ref}${obraSel ? '-' + semAcento(obraSel).replace(/[^a-z0-9]+/g, '-') : ''}.xlsx`);
       toast(`Resumo de ${refLabel(ref)} baixado (${linhas.length} colaborador${linhas.length === 1 ? '' : 'es'}).`);
     } catch (e) { toast(erroMsg(e)); }
   });
@@ -1440,7 +1446,7 @@ async function lerPlanilha(arq) {
       const jor = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => lerHora(v[d]));
       if (jor.some(x => x === null)) { E('Colaboradores', n, 'jornada inválida (use 09:00)'); continue; }
       const temJornada = jor.some(Boolean);
-      const d = {nome: v.Nome, codigo: String(v['Código']), cargo: v.Cargo, cbo: String(v.CBO), departamento: String(v.Departamento), filial: String(v.Filial),
+      const d = {nome: v.Nome, codigo: String(v['Código']), cargo: v.Cargo, obra: v.Obra ? String(v.Obra).trim() : '', cbo: String(v.CBO), departamento: String(v.Departamento), filial: String(v.Filial),
         centro_custo: v['Centro de custo'], lotacao: v['CC holerite'], tipo_salario: v.Tipo, admissao: adm, salario: sal, ajuda_custo: aj, dependentes: v.Dependentes === '' || v.Dependentes == null ? '' : Math.max(0, Math.round(+String(v.Dependentes).replace(',', '.') || 0)), email: v['E-mail'], tel: String(v.Telefone), banco: v.Banco};
       Object.keys(d).forEach(k => { if (d[k] === '' || d[k] == null) delete d[k]; });
       if (temJornada) d.jornada = jor;

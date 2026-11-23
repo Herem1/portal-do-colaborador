@@ -39,6 +39,10 @@ O colaborador assina com o dedo a folha de ponto de cada mês e, depois, o receb
 
 Quem já tinha instalado o portal antes dessa função precisa rodar `supabase/assinaturas.sql` no SQL Editor (uma vez).
 
+## Obras
+
+Cada colaborador pode ter uma **obra** no cadastro (ou na coluna Obra da planilha). Na aba Equipe, o filtro mostra só os colaboradores da obra escolhida, e o Resumo de horas pode sair por obra. Quem já tinha instalado o portal antes precisa rodar `supabase/obra.sql` no SQL Editor (uma vez).
+
 ## Regras da folha de ponto
 
 - Jornada prevista por dia da semana no cadastro do colaborador (ex.: seg a qui 09:00, sex 08:00).
