@@ -239,6 +239,15 @@ grant select (id, user_id, nome, cpf, codigo, cargo, cbo, departamento, filial, 
               admissao, email, tel, salario, ajuda_custo, dependentes, banco, jornada, criado_em)
   on public.colaboradores to authenticated;
 
+-- Permissões das tabelas (projetos novos do Supabase não dão essas permissões sozinhos)
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on public.admins, public.empresa, public.pontos, public.holerites, public.confirmacoes, public.avisos to authenticated;
+grant insert, update, delete on public.colaboradores to authenticated;
+grant select (id, user_id, nome, cpf, codigo, cargo, cbo, departamento, filial, centro_custo, lotacao, tipo_salario,
+              admissao, email, tel, salario, ajuda_custo, dependentes, banco, jornada, criado_em)
+  on public.colaboradores to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
 -- Quem pode chamar cada função
 revoke execute on all functions in schema public from public, anon;
 grant execute on function public.tem_admin()                to anon, authenticated;
