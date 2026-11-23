@@ -3,7 +3,7 @@
    Usado só na página de demonstração. O site real usa o Supabase.
    ===================================================== */
 (function () {
-  const LS = 'portal-colab-previa-v5';
+  const LS = 'portal-colab-previa-v6';
   const uid = () => 'u' + Math.random().toString(16).slice(2, 10) + '-0000-0000-0000-000000000000';
   const pad = n => String(n).padStart(2, '0');
   const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -44,10 +44,11 @@
       rodape: {salario_base: 2800, sal_contr_inss: 3556.58, base_fgts: 3556.58, fgts_mes: 284.53, base_irrf: 2116.08, faixa_irrf: 0}});
     DB.avisos.push({id: DB.seq++, titulo: 'Holerite disponível', texto: 'O holerite do mês passado já está na aba Holerites.', criado_em: new Date().toISOString()},
                    {id: DB.seq++, titulo: 'Confraternização de fim de ano', texto: 'Dia 18/12, a partir das 17h. Confirme presença com o RH.', criado_em: new Date(Date.now() - 3 * 864e5).toISOString()});
+    DB.assinaturas_holerite = [];
     return DB;
   }
   let DB; try { DB = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) {}
-  if (!DB || !DB.empresa || !DB.confirmacoes) DB = seed();
+  if (!DB || !DB.empresa || !DB.confirmacoes || !DB.assinaturas_holerite) DB = seed();
   const salvar = () => { try { localStorage.setItem(LS, JSON.stringify(DB)); } catch (e) {} };
   salvar();
   window.restaurarPrevia = () => { try { localStorage.removeItem(LS); } catch (e) {} location.reload(); };
@@ -56,6 +57,10 @@
   const isAdmin = () => DB.admins.includes(me());
   const meuColab = () => (DB.colaboradores.find(c => c.user_id === me()) || {}).id;
   const OCULTOS = ['codigo_acesso', 'tentativas'];
+  const codigoFake = () => Array.from({length: 16}, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('');
+  // Mesmo efeito dos gatilhos do banco: mudou a folha ou o holerite, a assinatura cai
+  const invalidaFolha = (cid, dia) => { DB.confirmacoes = DB.confirmacoes.filter(c => !(c.colaborador_id === cid && c.ref === String(dia).slice(0, 7))); };
+  const invalidaHol = id => { DB.assinaturas_holerite = DB.assinaturas_holerite.filter(a => a.holerite_id !== id); };
   // Mesmas regras de permissão do banco real
   const podeVer = (t, r) => {
     if (!me()) return false;
@@ -83,19 +88,21 @@
         const arr = [].concat(payload).map(p => ({id: t === 'colaboradores' ? 'c' + (DB.seq++) : DB.seq++, criado_em: new Date().toISOString(), ...(t === 'colaboradores' ? {user_id: null, codigo_acesso: Math.random().toString(16).slice(2, 8).toUpperCase(), jornada: ['', '09:00', '09:00', '09:00', '09:00', '08:00', '']} : {}), ...p}));
         if (t === 'colaboradores') arr.forEach(r => { if (T.some(x => x.cpf === r.cpf)) throw new Error('duplicate key value violates unique constraint "colaboradores_cpf_key"'); });
         if (t === 'holerites') arr.forEach(r => { if (T.some(x => x.colaborador_id === r.colaborador_id && x.ref === r.ref)) throw new Error('duplicate key value violates unique constraint "holerites_colaborador_id_ref_key"'); });
-        T.push(...arr); return {data: single ? {id: arr[0].id} : arr.map(x => ({id: x.id, cpf: x.cpf})), error: null};
+        T.push(...arr); if (t === 'pontos') arr.forEach(x => invalidaFolha(x.colaborador_id, x.dia)); return {data: single ? {id: arr[0].id} : arr.map(x => ({id: x.id, cpf: x.cpf})), error: null};
       }
       if (op === 'upsert') {
-        [].concat(payload).forEach(p => { const ex = T.find(r => conflict.every(k => r[k] == p[k])); if (ex) Object.assign(ex, p); else T.push({id: DB.seq++, ...p}); });
+        [].concat(payload).forEach(p => { const ex = T.find(r => conflict.every(k => r[k] == p[k])); if (t === 'pontos') invalidaFolha(p.colaborador_id, p.dia); if (ex) { if (t === 'holerites' && JSON.stringify([ex.itens, ex.rodape, ex.obs]) !== JSON.stringify([p.itens ?? ex.itens, p.rodape ?? ex.rodape, p.obs ?? ex.obs])) invalidaHol(ex.id); Object.assign(ex, p); } else T.push({id: DB.seq++, ...p}); });
         return {data: null, error: null};
       }
       let r = T.filter(x => filters.every(f => f(x)));
       if (op === 'update') {
         if (t === 'holerites' && payload.ref) r.forEach(x => { if (T.some(y => y !== x && y.colaborador_id === x.colaborador_id && y.ref === payload.ref)) throw new Error('duplicate key value violates unique constraint "holerites_colaborador_id_ref_key"'); });
-        r.forEach(x => Object.assign(x, payload)); return {data: null, error: null};
+        r.forEach(x => { if (t === 'pontos') invalidaFolha(x.colaborador_id, x.dia); if (t === 'holerites') invalidaHol(x.id); Object.assign(x, payload); }); return {data: null, error: null};
       }
       if (op === 'del') {
         DB[t] = T.filter(x => !r.includes(x));
+        if (t === 'pontos') r.forEach(x => invalidaFolha(x.colaborador_id, x.dia));
+        if (t === 'holerites') r.forEach(x => invalidaHol(x.id));
         if (t === 'colaboradores') r.forEach(c => { DB.confirmacoes = DB.confirmacoes.filter(p => p.colaborador_id !== c.id); DB.pontos = DB.pontos.filter(p => p.colaborador_id !== c.id); DB.holerites = DB.holerites.filter(h => h.colaborador_id !== c.id); });
         return {data: null, error: null};
       }
@@ -113,7 +120,8 @@
     criar_primeiro_admin: () => { if (DB.admins.length) return false; DB.admins.push(me()); return true; },
     is_admin: () => isAdmin(),
     checar_codigo: ({p_cpf, p_codigo}) => { const c = DB.colaboradores.find(x => x.cpf === p_cpf); return c && !c.user_id && c.codigo_acesso === String(p_codigo).trim().toUpperCase() ? 'ok' : 'invalido'; },
-    confirmar_folha: ({p_ref}) => { const c = meuColab(); if (!c) throw new Error('Conta sem cadastro de colaborador'); let x = DB.confirmacoes.find(y => y.colaborador_id === c && y.ref === p_ref); if (!x) { x = {colaborador_id: c, ref: p_ref, confirmado_em: new Date().toISOString()}; DB.confirmacoes.push(x); } return x.confirmado_em; },
+    confirmar_folha: ({p_ref, p_assinatura, p_aparelho}) => { const c = meuColab(); if (!c) throw new Error('Conta sem cadastro de colaborador'); let x = DB.confirmacoes.find(y => y.colaborador_id === c && y.ref === p_ref); if (!x) { x = {colaborador_id: c, ref: p_ref, confirmado_em: new Date().toISOString(), assinatura: p_assinatura || null, codigo: codigoFake(), ip: '(prévia)', aparelho: p_aparelho || null}; DB.confirmacoes.push(x); salvar(); } return x.confirmado_em; },
+    assinar_holerite: ({p_id, p_assinatura, p_aparelho}) => { const c = meuColab(); if (!c) throw new Error('Conta sem cadastro de colaborador'); const h = DB.holerites.find(y => y.id === p_id && y.colaborador_id === c); if (!h) throw new Error('Holerite não encontrado'); if (!/^data:image\/png;base64,/.test(p_assinatura || '')) throw new Error('Assinatura inválida'); let x = DB.assinaturas_holerite.find(y => y.holerite_id === p_id); if (!x) { x = {holerite_id: p_id, colaborador_id: c, assinado_em: new Date().toISOString(), assinatura: p_assinatura, codigo: codigoFake(), ip: '(prévia)', aparelho: p_aparelho || null}; DB.assinaturas_holerite.push(x); salvar(); } return x.assinado_em; },
     vincular_conta: ({p_cpf, p_codigo}) => { const c = DB.colaboradores.find(x => x.cpf === p_cpf && !x.user_id && x.codigo_acesso === String(p_codigo).trim().toUpperCase()); if (!c) return false; c.user_id = me(); c.codigo_acesso = null; return true; },
     codigo_acesso: ({p_colab}) => { if (!isAdmin()) throw new Error('Apenas o RH pode fazer isso'); return DB.colaboradores.find(x => x.id === p_colab).codigo_acesso; },
     resetar_acesso: ({p_colab}) => { if (!isAdmin()) throw new Error('Apenas o RH pode fazer isso'); const c = DB.colaboradores.find(x => x.id === p_colab); DB.users = DB.users.filter(u => u.id !== c.user_id); c.user_id = null; c.codigo_acesso = Math.random().toString(16).slice(2, 8).toUpperCase(); return c.codigo_acesso; }

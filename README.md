@@ -33,6 +33,12 @@ Abra o site, toque na aba **RH** e em **“Primeira vez? Criar conta do RH”**.
 
 Em seguida, vá na aba **Empresa** e preencha a razão social, o CNPJ e o logotipo.
 
+## Assinatura eletrônica
+
+O colaborador assina com o dedo a folha de ponto de cada mês e, depois, o recebimento do holerite. O portal guarda o desenho da assinatura, a data e a hora, o IP, o aparelho e um código de verificação do conteúdo. Se o RH mudar a folha ou o holerite depois, a assinatura é apagada e o colaborador assina de novo.
+
+Quem já tinha instalado o portal antes dessa função precisa rodar `supabase/assinaturas.sql` no SQL Editor (uma vez).
+
 ## Regras da folha de ponto
 
 - Jornada prevista por dia da semana no cadastro do colaborador (ex.: seg a qui 09:00, sex 08:00).

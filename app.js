@@ -234,6 +234,7 @@ async function render() {
     const html = await ({inicio:vInicio, ponto:vPonto, holerites:vHolerites, perfil:vPerfil, equipe:vEquipe, rhHol:vRhHol, avisos:vAvisos, mais:vMais})[view]();
     if (tok !== renderTok) return;
     $('view').innerHTML = html; $('view').dataset.v = view;
+    if ($('padFolha')) iniciarPad('padFolha');
   } catch (e) {
     if (tok !== renderTok) return;
     if (/JWT|session/i.test(e.message || '')) return sair();
@@ -391,7 +392,8 @@ function folhaHTML(colab, ref, registros, conf) {
       </tbody></table>${V ? `<div class="muted" style="font-size:11.5px;margin-top:6px">Valores brutos estimados com hora de ${BRL(vh)} (salário ÷ ${horasMes(colab)} h). Os valores finais, com INSS e IRRF, saem no holerite.</div>` : ''}`;
       })()}
     </div>
-    <div class="assin"><div>Assinatura do colaborador<br><small>${esc(colab.nome)}</small>${conf ? `<br><small style="color:var(--green)">✓ Confirmado pelo portal em ${dataHora(conf.confirmado_em)}</small>` : ''}</div><div>Assinatura do responsável</div></div>
+    ${conf ? seloAssinatura(conf.assinatura, conf.confirmado_em, conf.codigo, conf.ip, colab.nome) : ''}
+    <div class="assin"><div>Assinatura do colaborador<br><small>${esc(colab.nome)}</small>${conf && !conf.assinatura ? `<br><small style="color:var(--green)">✓ Confirmado pelo portal em ${dataHora(conf.confirmado_em)}</small>` : ''}</div><div>Assinatura do responsável</div></div>
   </div>`;
 }
 
@@ -399,7 +401,7 @@ function folhaHTML(colab, ref, registros, conf) {
    HOLERITE — recibo de pagamento
    ===================================================== */
 const totais = h => { const it = h.itens || []; const p = it.filter(i => i.tipo === 'p').reduce((a, i) => a + (+i.valor || 0), 0), d = it.filter(i => i.tipo === 'd').reduce((a, i) => a + (+i.valor || 0), 0); return {p, d, l: p - d}; };
-function holeriteHTML(h, c) {
+function holeriteHTML(h, c, ass) {
   const t = totais(h), r = h.rodape || {}, it = h.itens || [];
   const nv = v => (v === '' || v == null) ? '' : num(v);
   return `<div class="hol">
@@ -432,11 +434,46 @@ function holeriteHTML(h, c) {
       <div><span class="lb">Faixa IRRF</span>${nv(r.faixa_irrf)}</div>
     </div>
     ${h.obs ? `<div class="decl" style="font-family:inherit">${esc(h.obs)}</div>` : ''}
-    <div class="decl"><span>Declaro ter recebido a importância líquida discriminada neste recibo.</span><span>____/____/______ &nbsp; Assinatura do Funcionário</span></div>
+    <div class="decl"><span>Declaro ter recebido a importância líquida discriminada neste recibo.</span><span>${ass ? isoBR(ass.assinado_em) + ' &nbsp; ✓ Assinado eletronicamente' : '____/____/______ &nbsp; Assinatura do Funcionário'}</span></div>
+    ${ass ? seloAssinatura(ass.assinatura, ass.assinado_em, ass.codigo, ass.ip, c.nome || '') : ''}
   </div>`;
 }
 
-/* Confirmação ("dar OK") da folha do mês */
+/* =====================================================
+   ASSINATURA COM O DEDO (ou mouse)
+   ===================================================== */
+const padHTML = id => `<div class="pad-wrap"><canvas id="${id}" class="pad" aria-label="Área para assinar"></canvas>
+  <div class="pad-linha">Assine aqui com o dedo</div><button type="button" class="linkbtn pad-limpar" onclick="limparPad('${id}')">Limpar</button></div>`;
+const PADS = {};
+function iniciarPad(id) {
+  const cv = $(id); if (!cv) return;
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#13235a';
+  const st = PADS[id] = {tracos: 0, ult: null};
+  const pos = e => { const b = cv.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+  cv.onpointerdown = e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); st.ult = pos(e); st.tracos++; ctx.beginPath(); ctx.arc(st.ult[0], st.ult[1], 1, 0, 7); ctx.fillStyle = ctx.strokeStyle; ctx.fill(); };
+  cv.onpointermove = e => { if (!st.ult) return; e.preventDefault(); const p = pos(e); ctx.beginPath(); ctx.moveTo(st.ult[0], st.ult[1]); ctx.lineTo(p[0], p[1]); ctx.stroke(); st.ult = p; st.pontos = (st.pontos || 0) + 1; };
+  cv.onpointerup = cv.onpointercancel = () => { st.ult = null; };
+}
+function limparPad(id) { const cv = $(id); if (!cv) return; cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); PADS[id] = {...PADS[id], tracos: 0, pontos: 0}; }
+const padVazio = id => !PADS[id] || !PADS[id].tracos || (PADS[id].pontos || 0) < 8;
+// recorta o desenho e reduz para no máximo 600 x 200
+function padImagem(id) {
+  const cv = $(id), ctx = cv.getContext('2d'), {width: w, height: h} = cv, d = ctx.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = 0, y1 = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 10) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const m = 8; x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(w, x1 + m); y1 = Math.min(h, y1 + m);
+  const sw = x1 - x0, sh = y1 - y0, k = Math.min(1, 600 / sw, 200 / sh), o = document.createElement('canvas');
+  o.width = Math.max(1, Math.round(sw * k)); o.height = Math.max(1, Math.round(sh * k));
+  o.getContext('2d').drawImage(cv, x0, y0, sw, sh, 0, 0, o.width, o.height);
+  return o.toDataURL('image/png');
+}
+const aparelho = () => navigator.userAgent.slice(0, 300);
+const seloAssinatura = (img, quando, codigo, ip, nome) => `<div class="selo">${img ? `<img src="${esc(img)}" alt="Assinatura de ${esc(nome)}">` : ''}
+  <div class="selo-t">Assinado eletronicamente por ${esc(nome)} em ${dataHora(quando)}${ip ? ` · IP ${esc(ip)}` : ''}${codigo ? ` · Código ${esc(codigo)}` : ''}</div></div>`;
+
+/* Assinatura da folha do mês */
 const dataHora = ts => { const d = new Date(ts); return d.toLocaleDateString('pt-BR', {timeZone:'America/Sao_Paulo'}) + ' às ' + d.toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); };
 // Mês fechado com marcações e ainda sem OK do colaborador?
 async function folhasPendentes(colabId, refs) {
@@ -454,8 +491,9 @@ async function folhasPendentes(colabId, refs) {
 function irParaFolha(ref) { fecharSheet(); mesPonto = ref; ir('ponto'); }
 async function darOk(ref, btn) {
   if (!$('okCheck').checked) return toast('Marque que você conferiu a folha.');
+  if (padVazio('padFolha')) return toast('Faça a sua assinatura no quadro.');
   await comBotao(btn, async () => {
-    try { await q(sb.rpc('confirmar_folha', {p_ref: ref})); toast(`Folha de ${refLabel(ref)} confirmada. O holerite já pode ser aberto.`); render(); }
+    try { await q(sb.rpc('confirmar_folha', {p_ref: ref, p_assinatura: padImagem('padFolha'), p_aparelho: aparelho()})); toast(`Folha de ${refLabel(ref)} assinada. O holerite já pode ser aberto.`); render(); }
     catch (e) { toast(erroMsg(e)); }
   });
 }
@@ -475,8 +513,8 @@ async function vInicio() {
   const p1 = [...pend].sort()[0];
   return `
   ${p1 ? `<div class="card" style="border-color:#f1d59a;background:var(--amber-soft)"><div class="card-b">
-    <div style="font-weight:600;color:#8a5d10">Confira e dê OK na sua folha de ${refLabel(p1)}</div>
-    <div class="muted" style="margin:4px 0 10px;color:#8a5d10">O holerite desse mês só abre depois da sua confirmação.</div>
+    <div style="font-weight:600;color:#8a5d10">Confira e assine a sua folha de ${refLabel(p1)}</div>
+    <div class="muted" style="margin:4px 0 10px;color:#8a5d10">O holerite desse mês só abre depois da sua assinatura.</div>
     <button class="btn btn-primary" onclick="irParaFolha('${p1}')">Conferir folha</button></div></div>` : ''}
   <button class="card item" style="border:1px solid var(--line);display:block" onclick="mesPonto='${ref}';ir('ponto')">
     <div style="display:flex;align-items:center"><div class="d">Folha de ponto · ${refLabel(ref)}</div><span class="chev">${sv(IC.chev)}</span></div>
@@ -485,8 +523,8 @@ async function vInicio() {
       <div style="flex:1"><div class="big" style="color:var(--green)">${hm(T.extra)}</div><div class="muted">horas extras</div></div>
     </div>
   </button>
-  ${h ? `<button class="card item" style="border:1px solid var(--line)" onclick="${pend.has(h.ref) ? `irParaFolha('${h.ref}');toast('Dê OK na folha de ${refLabel(h.ref)} para abrir o holerite.')` : `verHolerite(${h.id})`}">
-    <div><div class="d">Último holerite · ${refLabel(h.ref)}</div>${pend.has(h.ref) ? `<div class="t" style="font-size:16px;margin-top:2px">🔒 Dê OK na folha para abrir</div>` : `<div class="t" style="font-size:22px;margin-top:2px">${BRL(totais(h).l)}</div><div class="d">valor líquido</div>`}</div>
+  ${h ? `<button class="card item" style="border:1px solid var(--line)" onclick="${pend.has(h.ref) ? `irParaFolha('${h.ref}');toast('Assine a folha de ${refLabel(h.ref)} para abrir o holerite.')` : `verHolerite(${h.id})`}">
+    <div><div class="d">Último holerite · ${refLabel(h.ref)}</div>${pend.has(h.ref) ? `<div class="t" style="font-size:16px;margin-top:2px">🔒 Assine a folha para abrir</div>` : `<div class="t" style="font-size:22px;margin-top:2px">${BRL(totais(h).l)}</div><div class="d">valor líquido</div>`}</div>
     <span class="chev">${sv(IC.chev)}</span></button>` : `<div class="card"><div class="empty">Nenhum holerite disponível ainda.</div></div>`}
   <div class="card"><div class="card-h"><h3>Avisos do RH</h3></div>
     ${av.length ? av.map(avisoHTML).join('') : '<div class="empty">Nenhum aviso no momento.</div>'}
@@ -499,16 +537,15 @@ async function vPonto() {
   const c = sess.colab, ref = mesPonto;
   const [regs, conf] = await Promise.all([
     q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', c.id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref))),
-    q(sb.from('confirmacoes').select('ref,confirmado_em').eq('colaborador_id', c.id).eq('ref', ref).maybeSingle())
+    q(sb.from('confirmacoes').select('ref,confirmado_em,assinatura,codigo,ip').eq('colaborador_id', c.id).eq('ref', ref).maybeSingle())
   ]);
   const podeConfirmar = ref < atual && regs.length;
   const caixaOk = !podeConfirmar ? (ref === atual ? '<div class="notice-mes muted no-print" style="padding:0 4px 10px">Mês em andamento. A confirmação fica disponível quando o mês fechar.</div>' : '')
-    : conf ? `<div class="card no-print" style="border-color:#bfe6d2;background:var(--green-soft)"><div class="card-b" style="color:var(--green);font-weight:600">✓ Você deu OK nesta folha em ${dataHora(conf.confirmado_em)}.</div></div>`
+    : conf ? `<div class="card no-print" style="border-color:#bfe6d2;background:var(--green-soft)"><div class="card-b" style="color:var(--green);font-weight:600">✓ Você assinou esta folha em ${dataHora(conf.confirmado_em)}.</div></div>`
     : `<div class="card no-print" style="border-color:#f1d59a"><div class="card-b">
         <div style="font-weight:600">Confira sua folha de ${refLabel(ref)}</div>
-        <div class="muted" style="margin:4px 0 10px">Depois do OK, o holerite deste mês fica liberado. Se algo estiver errado, não confirme e fale com o RH.</div>
-        <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-bottom:12px"><input type="checkbox" id="okCheck" style="width:20px;height:20px;margin-top:1px;flex:none"> Conferi os horários e estou de acordo com esta folha de ponto.</label>
-        <button class="btn btn-primary" onclick="darOk('${ref}',this)">Dar OK na folha</button>
+        <div class="muted" style="margin:4px 0 10px">Confira os dias abaixo e assine no fim da folha. Depois da assinatura, o holerite deste mês fica liberado. Se algo estiver errado, não assine e fale com o RH.</div>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('assinarFolha').scrollIntoView({behavior:'smooth',block:'center'})">Ir para a assinatura</button>
       </div></div>`;
   return `
   <div class="mes-nav">
@@ -518,32 +555,53 @@ async function vPonto() {
   </div>
   ${podeConfirmar && !conf ? caixaOk : ''}
   ${folhaHTML(c, ref, regs, conf)}
-  ${podeConfirmar && !conf ? '' : caixaOk}
+  ${podeConfirmar && !conf ? `<div class="card no-print" id="assinarFolha" style="border-color:#f1d59a"><div class="card-b">
+      <div style="font-weight:600;margin-bottom:8px">Assinar a folha de ${refLabel(ref)}</div>
+      <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-bottom:12px"><input type="checkbox" id="okCheck" style="width:20px;height:20px;margin-top:1px;flex:none"> Conferi os horários e estou de acordo com esta folha de ponto.</label>
+      ${padHTML('padFolha')}
+      <button class="btn btn-primary" style="margin-top:12px" onclick="darOk('${ref}',this)">Assinar folha</button>
+    </div></div>` : caixaOk}
   <div class="stack no-print"><button class="btn btn-ghost" onclick="imprimir()">${sv(IC.print, 18)} Imprimir / salvar em PDF</button></div>
   <p class="muted no-print" style="padding:10px 4px 0">Viu algum horário errado? Fale com o RH para corrigir.</p>`;
 }
 
 async function vHolerites() {
-  const l = await q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', sess.colab.id).order('ref', {ascending:false}));
-  const pend = await folhasPendentes(sess.colab.id, l.map(h => h.ref));
+  const [l, as] = await Promise.all([q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', sess.colab.id).order('ref', {ascending:false})),
+    q(sb.from('assinaturas_holerite').select('holerite_id').eq('colaborador_id', sess.colab.id))]);
+  const pend = await folhasPendentes(sess.colab.id, l.map(h => h.ref)), assinados = new Set(as.map(a => a.holerite_id));
   return `<div class="card">${l.length ? l.map(h => pend.has(h.ref)
-      ? `<button class="item" onclick="irParaFolha('${h.ref}');toast('Dê OK na folha de ${refLabel(h.ref)} para abrir o holerite.')">
-      <div><div class="t">🔒 ${refLabel(h.ref)}</div><div class="d" style="color:var(--amber)">Dê OK na folha de ponto para abrir</div></div><span class="chev">${sv(IC.chev)}</span></button>`
+      ? `<button class="item" onclick="irParaFolha('${h.ref}');toast('Assine a folha de ${refLabel(h.ref)} para abrir o holerite.')">
+      <div><div class="t">🔒 ${refLabel(h.ref)}</div><div class="d" style="color:var(--amber)">Assine a folha de ponto para abrir</div></div><span class="chev">${sv(IC.chev)}</span></button>`
       : `<button class="item" onclick="verHolerite(${h.id})">
-      <div><div class="t">${refLabel(h.ref)}</div><div class="d">Líquido ${BRL(totais(h).l)}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('')
+      <div><div class="t">${refLabel(h.ref)}</div><div class="d">Líquido ${BRL(totais(h).l)} · ${assinados.has(h.id) ? '<span style="color:var(--green)">✓ assinado</span>' : '<span style="color:var(--amber)">falta assinar</span>'}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('')
     : '<div class="empty">Nenhum holerite disponível ainda.</div>'}</div>`;
 }
 async function verHolerite(id) {
   sheetCarregando('Holerite');
   try {
-    const h = await q(sb.from('holerites').select('*').eq('id', id).single());
+    const [h, ass] = await Promise.all([q(sb.from('holerites').select('*').eq('id', id).single()), q(sb.from('assinaturas_holerite').select('*').eq('holerite_id', id).maybeSingle())]);
     const c = sess.tipo === 'colab' ? sess.colab : (cacheEquipe.find(x => x.id === h.colaborador_id) || {});
-    if (sess.tipo === 'colab' && (await folhasPendentes(c.id, [h.ref])).has(h.ref)) { irParaFolha(h.ref); return toast(`Dê OK na folha de ${refLabel(h.ref)} para abrir o holerite.`); }
+    if (sess.tipo === 'colab' && (await folhasPendentes(c.id, [h.ref])).has(h.ref)) { irParaFolha(h.ref); return toast(`Assine a folha de ${refLabel(h.ref)} para abrir o holerite.`); }
+    const assinar = sess.tipo === 'colab' && !ass;
     document.body.classList.add('imprimindo-sheet');
-    sheet(`Holerite · ${refLabel(h.ref)}`, holeriteHTML(h, c),
+    sheet(`Holerite · ${refLabel(h.ref)}`, holeriteHTML(h, c, ass) + (assinar ? `<div class="card no-print" id="assinarHol" style="border-color:#f1d59a;margin-top:14px"><div class="card-b">
+        <div style="font-weight:600;margin-bottom:4px">Assinar o recebimento</div>
+        <div class="muted" style="margin-bottom:10px">Ao assinar, você declara que recebeu o valor líquido deste holerite.</div>
+        ${padHTML('padHol')}
+        <button class="btn btn-primary" style="margin-top:12px" onclick="assinarHolerite(${id},this)">Assinar holerite</button></div></div>`
+      : sess.tipo === 'rh' && !ass ? '<p class="muted no-print" style="margin-top:10px">O colaborador ainda não assinou este holerite.</p>' : ''),
       [['Fechar', 'ghost', 'fecharSheet()'], [sv(IC.print, 18) + ' Imprimir', 'primary', 'imprimir()']]);
     document.body.classList.add('imprimindo-sheet');
+    if (assinar) iniciarPad('padHol');
   } catch (e) { fecharSheet(); toast(erroMsg(e)); }
+}
+
+async function assinarHolerite(id, btn) {
+  if (padVazio('padHol')) return toast('Faça a sua assinatura no quadro.');
+  await comBotao(btn, async () => {
+    try { await q(sb.rpc('assinar_holerite', {p_id: id, p_assinatura: padImagem('padHol'), p_aparelho: aparelho()})); toast('Holerite assinado. Obrigado!'); verHolerite(id); render(); }
+    catch (e) { toast(erroMsg(e)); }
+  });
 }
 
 async function vPerfil() {
@@ -613,7 +671,7 @@ function listaEquipe() {
   const l = cacheEquipe.filter(c => !t || c.nome.toLowerCase().includes(t) || (c.cargo || '').toLowerCase().includes(t) || (dq && c.cpf.includes(dq)));
   return l.length ? l.map(c => `<button class="item" onclick="verColab('${c.id}')"><div class="av">${esc(ini(c.nome))}</div>
       <div style="min-width:0;flex:1"><div class="t">${esc(c.nome)}</div><div class="d">${esc(c.cargo || 'Sem cargo')} · ${fmtCPF(c.cpf)}</div>
-      <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${statusOk[c.id] === 'ok' ? `<span class="tag t-ok">OK na folha de ${MESES[+mesAnterior().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? `<span class="tag t-neutral">Folha de ${MESES[+mesAnterior().slice(5) - 1]} sem OK</span>` : ''}</div></div>
+      <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${statusOk[c.id] === 'ok' ? `<span class="tag t-ok">Folha assinada · ${MESES[+mesAnterior().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? `<span class="tag t-neutral">Folha de ${MESES[+mesAnterior().slice(5) - 1]} sem assinatura</span>` : ''}</div></div>
       <span class="chev">${sv(IC.chev)}</span></button>`).join('')
     : `<div class="empty">${cacheEquipe.length ? 'Ninguém encontrado.' : 'Nenhum colaborador cadastrado ainda.<br>Toque no botão + para adicionar.'}</div>`;
 }
@@ -621,11 +679,13 @@ async function verColab(id) {
   const c = cacheEquipe.find(x => x.id === id); if (!c) return;
   sheetCarregando(esc(c.nome));
   try {
-    const [hs, confs, cod] = await Promise.all([
+    const [hs, confs, cod, as] = await Promise.all([
       q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', id).order('ref', {ascending:false})),
       c.user_id ? q(sb.from('confirmacoes').select('ref,confirmado_em').eq('colaborador_id', id)) : Promise.resolve([]),
-      c.user_id ? Promise.resolve(null) : q(sb.rpc('codigo_acesso', {p_colab: id}))
+      c.user_id ? Promise.resolve(null) : q(sb.rpc('codigo_acesso', {p_colab: id})),
+      q(sb.from('assinaturas_holerite').select('holerite_id,assinado_em').eq('colaborador_id', id))
     ]);
+    const assDe = hid => as.find(a => a.holerite_id === hid);
     const atual = agoraBR().iso.slice(0, 7), ant = mesAnterior();
     sheet(esc(c.nome), `
       <div class="muted" style="margin-bottom:12px">${esc(c.cargo || '')} · CPF ${fmtCPF(c.cpf)}</div>
@@ -636,14 +696,14 @@ async function verColab(id) {
         <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="copiarConvite('${id}','${esc(cod || '')}')">Copiar mensagem para enviar</button>
       </div></div>`}
       <div class="sec-t">Folha de ponto</div>
-      ${(() => { const cf = confs.find(x => x.ref === ant); return `<div class="muted" style="margin:-2px 4px 10px">${cf ? `<span style="color:var(--green)">✓ OK na folha de ${refLabel(ant)} em ${dataHora(cf.confirmado_em)}</span>` : `Folha de ${refLabel(ant)}: ainda sem OK do colaborador.`}</div>`; })()}
+      ${(() => { const cf = confs.find(x => x.ref === ant); return `<div class="muted" style="margin:-2px 4px 10px">${cf ? `<span style="color:var(--green)">✓ Folha de ${refLabel(ant)} assinada em ${dataHora(cf.confirmado_em)}</span>` : `Folha de ${refLabel(ant)}: ainda sem assinatura do colaborador.`}</div>`; })()}
       <div class="stack" style="margin-bottom:16px">
         <button class="btn btn-primary" onclick="editarFolha('${id}','${ant}')">Preencher ${refLabel(ant)}</button>
         <button class="btn btn-ghost" onclick="editarFolha('${id}','${atual}')">Preencher ${refLabel(atual)}</button>
         <button class="btn btn-ghost" onclick="verFolhaRH('${id}','${ant}')">Ver folha como o colaborador vê</button>
       </div>
       <div class="sec-t">Holerites</div>
-      <div class="card">${hs.length ? hs.map(h => `<button class="item" onclick="editarHolerite(${h.id})"><div><div class="t">${refLabel(h.ref)}</div><div class="d">Líquido ${BRL(totais(h).l)}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('') : '<div class="empty">Nenhum holerite.</div>'}</div>
+      <div class="card">${hs.length ? hs.map(h => `<button class="item" onclick="editarHolerite(${h.id})"><div><div class="t">${refLabel(h.ref)}</div><div class="d">Líquido ${BRL(totais(h).l)} · ${assDe(h.id) ? `<span style="color:var(--green)">✓ assinado em ${isoBR(assDe(h.id).assinado_em)}</span>` : 'sem assinatura'}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('') : '<div class="empty">Nenhum holerite.</div>'}</div>
       <div class="stack" style="margin-bottom:16px">
         <button class="btn btn-primary" onclick="abrirGerador('${id}','${ant}')">Calcular holerite de ${refLabel(ant)} pela folha</button>
         <button class="btn btn-ghost" onclick="editarHolerite(null,'${id}')">${sv(IC.plus, 16)} Lançar holerite à mão</button>
@@ -796,7 +856,7 @@ async function salvarFolha(btn) {
       for (const iso of dels) await q(sb.from('pontos').delete().eq('colaborador_id', id).eq('dia', iso));
       const tinhaOk = (await q(sb.from('confirmacoes').select('ref').eq('colaborador_id', id).eq('ref', ref))).length;
       if (tinhaOk) await q(sb.from('confirmacoes').delete().eq('colaborador_id', id).eq('ref', ref));
-      toast(tinhaOk ? `Folha salva. Como mudou, o colaborador precisa dar OK de novo.` : `Folha de ${refLabel(ref)} salva.`); verFolhaRH(id, ref);
+      toast(tinhaOk ? `Folha salva. Como mudou, o colaborador precisa assinar de novo.` : `Folha de ${refLabel(ref)} salva.`); verFolhaRH(id, ref);
     } catch (x) { erro(erroMsg(x)); }
   });
 }
@@ -805,12 +865,12 @@ async function verFolhaRH(id, ref) {
   sheetCarregando('Folha de ponto');
   const [regs, conf] = await Promise.all([
     q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref))),
-    q(sb.from('confirmacoes').select('ref,confirmado_em').eq('colaborador_id', id).eq('ref', ref).maybeSingle())]);
+    q(sb.from('confirmacoes').select('ref,confirmado_em,assinatura,codigo,ip').eq('colaborador_id', id).eq('ref', ref).maybeSingle())]);
   document.body.classList.add('imprimindo-sheet');
   sheet(`Folha · ${refLabel(ref)}`, `<div class="mes-nav no-print">
       <button class="btn btn-ghost btn-sm" aria-label="Mês anterior" onclick="verFolhaRH('${id}','${somaMes(ref, -1)}')">‹</button><div>${refLabel(ref)}</div>
       <button class="btn btn-ghost btn-sm" aria-label="Próximo mês" onclick="verFolhaRH('${id}','${somaMes(ref, 1)}')">›</button></div>
-    <div class="muted no-print" style="margin-bottom:8px">${conf ? `<span style="color:var(--green)">✓ Colaborador deu OK em ${dataHora(conf.confirmado_em)}</span>` : 'Ainda sem OK do colaborador.'}</div>
+    <div class="muted no-print" style="margin-bottom:8px">${conf ? `<span style="color:var(--green)">✓ Colaborador assinou em ${dataHora(conf.confirmado_em)}</span>` : 'Ainda sem assinatura do colaborador.'}</div>
     ${folhaHTML(c, ref, regs, conf)}`,
     [['Voltar', 'ghost', `verColab('${id}')`], ['Editar', 'primary', `editarFolha('${id}','${ref}')`]]);
   document.body.classList.add('imprimindo-sheet');
@@ -962,6 +1022,7 @@ function desenharHolerite() {
   sheet(r.id ? 'Editar holerite' : 'Lançar holerite', `
     <div class="field"><label for="hC">Colaborador</label><select id="hC" ${r.id ? 'disabled' : ''} onchange="trocarColabHol(this.value)">${cacheEquipe.map(c => `<option value="${c.id}" ${c.id === r.colabId ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></div>
     <div class="field"><label for="hR">Mês de referência</label><input id="hR" type="month" value="${r.ref}" onchange="rascunho.ref=this.value"></div>
+    ${r.id ? `<div id="hAss" class="muted" style="margin:-4px 0 10px"></div>` : ''}
     ${notaCalculo(r.calc)}
     <button class="btn btn-ghost btn-sm" style="margin-bottom:6px" onclick="abrirGerador(rascunho.colabId, rascunho.ref, rascunho.id)">Calcular pela folha de ponto</button>
     <div class="sec-t">Verbas (código · descrição · referência · valor)</div>
@@ -987,6 +1048,9 @@ function desenharHolerite() {
       ${r.id ? `<button class="btn btn-danger" onclick="excluirHolerite(${r.id})">Excluir holerite</button>` : ''}
     </div>`,
     [['Cancelar', 'ghost', 'fecharSheet()'], ['Salvar', 'primary', 'salvarHolerite(this)']]);
+  if (r.id) q(sb.from('assinaturas_holerite').select('assinado_em').eq('holerite_id', r.id).maybeSingle()).then(a => { const e = $('hAss'); if (e) e.innerHTML = a
+    ? `<span style="color:var(--green)">✓ Assinado pelo colaborador em ${dataHora(a.assinado_em)}.</span> Se você mudar e salvar, a assinatura é apagada e ele assina de novo. <button class="linkbtn" onclick="verHolerite(${r.id})">Ver holerite assinado</button>`
+    : 'O colaborador ainda não assinou este holerite.'; }).catch(() => {});
 }
 function calcRodape() {
   const r = rascunho, c = cacheEquipe.find(x => x.id === r.colabId) || {}, it = r.itens.map(i => ({...i, valor: +i.valor || 0}));
@@ -1134,7 +1198,7 @@ function modeloPlanilha() {
       ['', 'Seg a Dom = jornada prevista do dia (ex.: 09:00). Deixe vazio nos dias sem expediente.'],
       ['Ponto', 'Um dia por linha. Data no formato dd/mm/aaaa e horários no formato 07:00.'],
       ['', 'Ocorrência (opcional): Feriado, Sem expediente, Folga, Atestado, Férias ou Falta.'],
-      ['', 'Se o colaborador já tinha dado OK na folha do mês, ele precisará dar OK de novo.'],
+      ['', 'Se o colaborador já tinha assinado a folha do mês, ele precisará assinar de novo.'],
       ['Holerites', 'Uma verba por linha (mesmo CPF e mês = mesmo holerite). Preencha Vencimento OU Desconto. Mês no formato mm/aaaa.'],
       ['', 'Importar de novo o mesmo CPF e mês substitui o holerite inteiro.'],
       ['Bases holerite', 'Opcional: rodapé do holerite (uma linha por CPF e mês).']],
