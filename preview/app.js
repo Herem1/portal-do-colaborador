@@ -268,25 +268,40 @@ const avisoHTML = a => `<div class="aviso"><div class="t">${esc(a.titulo)}</div>
    • Extras 50%: seg a sex · 100%: sábado · 110%: domingo e feriado.
    ===================================================== */
 const TOLERANCIA = 10;
+// Converte as marcações em minutos corridos: se um horário é menor que o anterior, passou da meia-noite.
+// Ex.: 22:00, 02:00, 03:00, 06:00 → 1320, 1560, 1620, 1800. Devolve null se o turno passar de 24 h.
+function minutosCorridos(m) {
+  m = (m || []).filter(Boolean); const out = []; let dia = 0;
+  for (let i = 0; i < m.length; i++) { let v = toMin(m[i]) + dia; if (i && v <= out[i - 1]) { dia += 1440; v += 1440; } out.push(v); }
+  return out.length && out[out.length - 1] - out[0] >= 1440 ? null : out;
+}
 function trabalhado(m) {
-  m = (m || []).filter(Boolean);
+  const a = minutosCorridos(m) || [];
   let t = 0;
-  if (m.length >= 2) t += toMin(m[1]) - toMin(m[0]);
-  if (m.length >= 4) t += toMin(m[3]) - toMin(m[2]);
+  if (a.length >= 2) t += a[1] - a[0];
+  if (a.length >= 4) t += a[3] - a[2];
   return Math.max(t, 0);
 }
+// Minutos trabalhados entre 22h e 5h (horário noturno, art. 73 da CLT)
+function noturno(m) {
+  const a = minutosCorridos(m) || [], jan = [[-120, 300], [1320, 1740], [2760, 3180]];
+  let t = 0;
+  for (const [i, f] of [[0, 1], [2, 3]]) if (a[f] != null) for (const [j0, j1] of jan) t += Math.max(0, Math.min(a[f], j1) - Math.max(a[i], j0));
+  return t;
+}
+const HORA_NOTURNA = 52.5; // hora noturna reduzida: 52 min 30 s
 function calcularFolha(colab, ref, registros) {
   const [y] = ref.split('-').map(Number), fer = feriadosDoAno(y), hoje = agoraBR().iso;
   const porDia = Object.fromEntries((registros || []).map(r => [String(r.dia).slice(0, 10), r]));
   const jor = colab.jornada && colab.jornada.length === 7 ? colab.jornada : ['', '09:00', '09:00', '09:00', '09:00', '08:00', ''];
-  const dias = [], T = {trab:0, prev:0, extra:0, atraso:0, e50:0, e100:0, e110:0};
+  const dias = [], T = {trab:0, prev:0, extra:0, atraso:0, e50:0, e100:0, e110:0, not:0};
   for (let d = 1; d <= diasNoMes(ref); d++) {
     const iso = `${ref}-${String(d).padStart(2, '0')}`, dw = dataObj(iso).getDay(), r = porDia[iso] || {};
     const m = (r.marcacoes || []).filter(Boolean), oc = r.ocorrencia || '', feriado = fer[iso] || (oc === 'Feriado' ? 'Feriado' : '');
     const futuro = iso > hoje && !m.length;
     const abona = feriado || ['Sem expediente', 'Folga', 'Atestado', 'Férias'].includes(oc);
     const prev = futuro || abona ? 0 : toMin(jor[dw]);
-    const trab = trabalhado(m);
+    const trab = trabalhado(m), not = noturno(m);
     let extra = 0, atraso = 0;
     if (!futuro) {
       const dif = trab - prev;
@@ -296,8 +311,8 @@ function calcularFolha(colab, ref, registros) {
     }
     const faixa = feriado || dw === 0 ? 110 : dw === 6 ? 100 : 50;
     if (extra) T['e' + faixa] += extra;
-    T.trab += trab; T.prev += prev; T.extra += extra; T.atraso += atraso;
-    dias.push({iso, d, dw, m, oc: oc || (fer[iso] ? '' : ''), feriado, obs: r.observacao || '', trab, prev, extra, atraso, futuro,
+    T.trab += trab; T.not += not; T.prev += prev; T.extra += extra; T.atraso += atraso;
+    dias.push({iso, d, dw, m, not, oc: oc || (fer[iso] ? '' : ''), feriado, obs: r.observacao || '', trab, prev, extra, atraso, futuro,
       cinza: dw === 0 || dw === 6 || !!feriado});
   }
   return {dias, T};
@@ -335,15 +350,15 @@ function folhaHTML(colab, ref, registros, conf) {
     return `<tr class="${x.cinza ? 'cinza' : ''}"><td>${dt}</td><td>${DIAS[x.dw]}</td>
       <td class="hr">${t(0)}</td><td class="hr">${t(1)}</td><td class="hr">${t(2)}</td><td class="hr">${t(3)}</td>
       <td>${x.futuro ? '' : hmOu(x.trab)}</td><td>${x.futuro ? '' : hmOu(x.prev)}</td>
-      <td class="ex">${x.futuro ? '' : hmOu(x.extra)}</td><td class="at">${x.futuro ? '' : hmOu(x.atraso)}</td>
+      <td class="ex">${x.futuro ? '' : hmOu(x.extra)}</td><td class="at">${x.futuro ? '' : hmOu(x.atraso)}</td>${T.not ? `<td>${hmOu(x.not)}</td>` : ''}
       <td class="ob">${esc(oc)}</td><td class="ob">${esc(obs)}</td></tr>`;
   }).join('');
   const tabela = `<div class="fp-tabela ${modoFolha === 'tabela' ? '' : 'hide-tela'}">
     <div class="hint no-print">${sv(IC.swipe, 15)} Arraste a tabela para o lado para ver todas as colunas.</div>
     <div class="fp-scroll"><table class="fp">
-      <thead><tr><th>Data</th><th>Dia</th><th>Entrada</th><th>Saída almoço</th><th>Retorno almoço</th><th>Saída</th><th>Horas trabalhadas</th><th>Jornada prevista</th><th>Horas extras</th><th>Atrasos / faltas</th><th>Ocorrência</th><th style="min-width:150px">Observações</th></tr></thead>
+      <thead><tr><th>Data</th><th>Dia</th><th>Entrada</th><th>Saída almoço</th><th>Retorno almoço</th><th>Saída</th><th>Horas trabalhadas</th><th>Jornada prevista</th><th>Horas extras</th><th>Atrasos / faltas</th>${T.not ? '<th>Noturno (22h–5h)</th>' : ''}<th>Ocorrência</th><th style="min-width:150px">Observações</th></tr></thead>
       <tbody>${linhas}
-        <tr class="tot"><td colspan="6">TOTAIS DO MÊS</td><td>${hm(T.trab)}</td><td>${hm(T.prev)}</td><td>${hmOu(T.extra)}</td><td>${hmOu(T.atraso)}</td><td></td><td></td></tr>
+        <tr class="tot"><td colspan="6">TOTAIS DO MÊS</td><td>${hm(T.trab)}</td><td>${hm(T.prev)}</td><td>${hmOu(T.extra)}</td><td>${hmOu(T.atraso)}</td>${T.not ? `<td>${hm(T.not)}</td>` : ''}<td></td><td></td></tr>
       </tbody></table></div></div>`;
   // ----- lista (feita para a tela do celular) -----
   const lista = `<div class="fp-lista ${modoFolha === 'lista' ? '' : 'hide-tela'}">${dias.map(x => {
@@ -354,7 +369,7 @@ function folhaHTML(colab, ref, registros, conf) {
     else if (x.futuro) meio = `<div class="dl-vazio">—</div>`;
     else meio = `<div class="dl-vazio">${esc(oc || (fds ? 'Descanso' : (x.prev ? 'Sem marcação' : 'Sem expediente')))}</div>`;
     const sub = [x.m.length && oc ? esc(oc) : '', esc(x.obs)].filter(Boolean).join(' · ');
-    const dir = x.futuro || (!x.trab && !x.atraso) ? '' : `<div class="dl-r"><b>${hmOu(x.trab)}</b>${x.extra ? `<span class="ex">+${hm(x.extra)}</span>` : x.atraso ? `<span class="at">−${hm(x.atraso)}</span>` : `<span class="ok">✓</span>`}</div>`;
+    const dir = x.futuro || (!x.trab && !x.atraso) ? '' : `<div class="dl-r"><b>${hmOu(x.trab)}</b>${x.not ? `<span class="nt">🌙 ${hm(x.not)}</span>` : ''}${x.extra ? `<span class="ex">+${hm(x.extra)}</span>` : x.atraso ? `<span class="at">−${hm(x.atraso)}</span>` : `<span class="ok">✓</span>`}</div>`;
     return `<div class="dl ${x.cinza ? 'cinza' : ''} ${!x.m.length ? 'vazio' : ''}">
       <div class="dl-d"><b>${String(x.d).padStart(2, '0')}</b><small>${DIAS[x.dw]}</small></div>
       <div class="dl-m">${meio}${sub ? `<div class="dl-o">${sub}</div>` : ''}</div>${dir}</div>`;
@@ -379,13 +394,15 @@ function folhaHTML(colab, ref, registros, conf) {
       ${(() => {
         const vh = valorHora(colab), V = vh > 0, {uteis, rep} = diasDSR(ref);
         const v50 = r2(T.e50 / 60 * vh * 1.5), v100 = r2(T.e100 / 60 * vh * 2), v110 = r2(T.e110 / 60 * vh * 2.1);
-        const dsr = uteis ? r2((v50 + v100 + v110) / uteis * rep) : 0, vat = r2(T.atraso / 60 * vh), liq = v50 + v100 + v110 + dsr - vat;
+        const vnot = r2(T.not / HORA_NOTURNA * vh * 0.2);
+        const dsr = uteis ? r2((v50 + v100 + v110 + vnot) / uteis * rep) : 0, vat = r2(T.atraso / 60 * vh), liq = v50 + v100 + v110 + vnot + dsr - vat;
         const c = x => V ? `<td class="n">${x ? BRL(x) : '-'}</td>` : '';
         return `<table class="mini"><thead><tr><th style="text-align:left">Descrição</th><th>Horas</th><th>Adicional</th>${V ? '<th>Valor</th>' : ''}</tr></thead><tbody>
         <tr><td>Extras 50% (segunda a sexta)</td><td class="n">${hmOu(T.e50)}</td><td class="g">50%</td>${c(v50)}</tr>
         <tr><td>Extras 100% (sábado)</td><td class="n">${hmOu(T.e100)}</td><td class="g">100%</td>${c(v100)}</tr>
         <tr><td>Extras 110% (domingo e feriado)</td><td class="n">${hmOu(T.e110)}</td><td class="g">110%</td>${c(v110)}</tr>
-        ${V ? `<tr><td>DSR sobre extras (${rep} repousos / ${uteis} dias úteis)</td><td></td><td></td>${c(dsr)}</tr>` : ''}
+        ${T.not ? `<tr><td>Adicional noturno (22h às 5h · hora de 52min30s)</td><td class="n">${hm(T.not)}</td><td class="g">20%</td>${c(vnot)}</tr>` : ''}
+        ${V ? `<tr><td>DSR sobre extras e noturno (${rep} repousos / ${uteis} dias úteis)</td><td></td><td></td>${c(dsr)}</tr>` : ''}
         <tr><td>Desconto de atrasos / faltas</td><td class="n">${hmOu(T.atraso)}</td><td></td>${V ? `<td class="n">${vat ? '−' + BRL(vat) : '-'}</td>` : ''}</tr>
         <tr><td>Ajuda de custo (mensal)</td><td class="n" colspan="${V ? 3 : 2}">${ajuda ? BRL(ajuda) : '-'}</td></tr>
         <tr class="tot"><td>Saldo (extras – atrasos)</td><td class="n">${hm(saldo)}</td><td></td>${V ? `<td class="n">${liq < 0 ? '−' : ''}${BRL(Math.abs(liq))}</td>` : ''}</tr>
@@ -806,30 +823,53 @@ async function editarFolha(id, ref) {
   let html = `<div class="muted" style="margin-bottom:8px">${esc(c.nome)} · ${refLabel(ref)}</div>
     <div class="card no-print"><div class="card-b">
       <div style="font-weight:600;margin-bottom:6px">Preencher rápido</div>
-      <div class="t4">${ROT.map((r, i) => `<input id="pd${i}" inputmode="numeric" placeholder="${['07:00', '11:40', '12:40', '17:00'][i]}" aria-label="${r} padrão">`).join('')}</div>
+      <div class="t4">${ROT.map((r, i) => `<input id="pd${i}" inputmode="numeric" placeholder="${['07:00', '12:00', '13:00', '17:00'][i]}" aria-label="${r} padrão">`).join('')}</div>
       <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="preencherPadrao()">Copiar para os dias de trabalho vazios</button>
     </div></div>
-    <div class="muted" style="font-size:12px;margin-bottom:4px">Horários: entrada · saída almoço · retorno almoço · saída. Pode digitar só números (0700).</div>`;
+    <div class="muted" style="font-size:12.5px;margin:2px 2px 8px">Digite só números (0700 vira 07:00). Turno que passa da meia-noite pode: ex. entrada 22:00 e saída 06:00. Também dá para copiar as horas de uma planilha do Excel e colar na primeira célula.</div>
+    <div class="ed-scroll"><table class="ed"><thead><tr><th>Dia</th><th>Entrada</th><th>Saída</th><th>Entrada</th><th>Saída</th><th>Ocorrência</th><th>Observação</th></tr></thead><tbody>`;
   for (let d = 1; d <= diasNoMes(ref); d++) {
     const iso = `${ref}-${String(d).padStart(2, '0')}`, dw = dataObj(iso).getDay(), r = edFolha.orig[iso] || {}, m = r.marcacoes || [];
     const cinza = dw === 0 || dw === 6 || fer[iso];
-    html += `<div class="dia-ed ${cinza ? 'cinza' : ''}" data-iso="${iso}" data-trab="${jor[dw] && !fer[iso] ? 1 : 0}">
-      <div class="h">${String(d).padStart(2, '0')}/${ref.slice(5, 7)} <small>${DIAS[dw]}</small>${fer[iso] ? `<span class="tag t-info">${esc(fer[iso])}</span>` : ''}</div>
-      <div class="t4">${ROT.map((rt, i) => `<input inputmode="numeric" aria-label="${rt} ${d}" value="${esc(m[i] || '')}" maxlength="5" onblur="this.value=normHora(this.value)??this.value">`).join('')}</div>
-      <div class="oc"><select aria-label="Ocorrência ${d}">${OCORRENCIAS.map(o => `<option value="${o}" ${o === (r.ocorrencia || '') ? 'selected' : ''}>${o || 'Ocorrência…'}</option>`).join('')}</select>
-        <input aria-label="Observação ${d}" placeholder="Observação" value="${esc(r.observacao || '')}" maxlength="80"></div>
-    </div>`;
+    html += `<tr class="${cinza ? 'cinza' : ''}" data-iso="${iso}" data-trab="${jor[dw] && !fer[iso] ? 1 : 0}">
+      <th title="${esc(fer[iso] || '')}">${String(d).padStart(2, '0')}/${ref.slice(5, 7)}<small>${DIAS[dw]}${fer[iso] ? ' · feriado' : ''}</small></th>
+      ${ROT.map((rt, i) => `<td><input class="hr-in" inputmode="numeric" aria-label="${rt} ${d}" value="${esc(m[i] || '')}" maxlength="5" data-l="${d - 1}" data-c="${i}" onblur="this.value=normHora(this.value)??this.value" onkeydown="navFolha(event,this)" onpaste="colarFolha(event,this)"></td>`).join('')}
+      <td><select aria-label="Ocorrência ${d}" data-l="${d - 1}" data-c="4">${OCORRENCIAS.map(o => `<option value="${o}" ${o === (r.ocorrencia || '') ? 'selected' : ''}>${o || '—'}</option>`).join('')}</select></td>
+      <td><input class="obs-in" aria-label="Observação ${d}" value="${esc(r.observacao || '')}" maxlength="80" data-l="${d - 1}" data-c="5" onkeydown="navFolha(event,this)" onpaste="colarFolha(event,this)"></td>
+    </tr>`;
   }
-  html += '<div class="err hide" id="fErr" style="margin-top:10px"></div>';
+  html += '</tbody></table></div><div class="err hide" id="fErr" style="margin-top:10px"></div>';
   sheet('Folha de ponto', html, [['Cancelar', 'ghost', `verColab('${id}')`], ['Salvar mês', 'primary', 'salvarFolha(this)']]);
+  document.querySelector('.sheet')?.classList.add('sheet-larga');
+}
+const celFolha = (l, c) => document.querySelector(`table.ed [data-l="${l}"][data-c="${c}"]`);
+// Enter ou seta para baixo/cima: muda de linha, como no Excel
+function navFolha(ev, el) {
+  const l = +el.dataset.l, c = +el.dataset.c, mv = {Enter: [1, 0], ArrowDown: [1, 0], ArrowUp: [-1, 0]}[ev.key];
+  if (!mv) return;
+  const alvo = celFolha(l + mv[0], c + mv[1]); if (alvo) { ev.preventDefault(); alvo.focus(); alvo.select && alvo.select(); }
+}
+// Colar um bloco copiado do Excel (linhas = dias, colunas = Entrada, Saída, Entrada, Saída, Ocorrência, Observação)
+function colarFolha(ev, el) {
+  const txt = (ev.clipboardData || window.clipboardData).getData('text');
+  if (!/[\t\n]/.test(txt.trim())) return;
+  ev.preventDefault();
+  const l0 = +el.dataset.l, c0 = +el.dataset.c; let n = 0;
+  txt.replace(/\r/g, '').replace(/\n$/, '').split('\n').forEach((linha, i) => linha.split('\t').forEach((v, j) => {
+    const cel = celFolha(l0 + i, c0 + j); if (!cel) return; v = v.trim();
+    if (cel.tagName === 'SELECT') { const o = OCORRENCIAS.find(x => x && semAcento(x) === semAcento(v)); cel.value = o || ''; }
+    else cel.value = cel.classList.contains('hr-in') ? (normHora(v) ?? v) : v;
+    n++;
+  }));
+  toast(`${n} célula(s) colada(s). Confira e toque em Salvar mês.`);
 }
 function preencherPadrao() {
   const p = ROT.map((_, i) => normHora($('pd' + i).value));
-  if (p.some(x => !x)) return toast('Preencha os 4 horários padrão (ex.: 0700, 1140, 1240, 1700).');
+  if (p.some(x => !x)) return toast('Preencha os 4 horários padrão (ex.: 0700, 1200, 1300, 1700).');
   let n = 0;
-  document.querySelectorAll('.dia-ed').forEach(el => {
+  document.querySelectorAll('table.ed tbody tr').forEach(el => {
     if (el.dataset.trab !== '1') return;
-    const ins = el.querySelectorAll('.t4 input'), oc = el.querySelector('select').value;
+    const ins = el.querySelectorAll('.hr-in'), oc = el.querySelector('select').value;
     if (oc || [...ins].some(i => i.value.trim())) return;
     ins.forEach((inp, i) => inp.value = p[i]); n++;
   });
@@ -838,15 +878,15 @@ function preencherPadrao() {
 async function salvarFolha(btn) {
   const {id, ref, orig} = edFolha, ups = [], dels = [], e = $('fErr');
   const erro = m => { e.textContent = m; e.classList.remove('hide'); e.scrollIntoView({block:'center'}); };
-  for (const el of document.querySelectorAll('.dia-ed')) {
+  for (const el of document.querySelectorAll('table.ed tbody tr')) {
     const iso = el.dataset.iso, d = isoBR(iso).slice(0, 5);
-    const vals = [...el.querySelectorAll('.t4 input')].map(i => normHora(i.value));
+    const vals = [...el.querySelectorAll('.hr-in')].map(i => normHora(i.value));
     if (vals.some(v => v === null)) return erro(`Dia ${d}: horário inválido. Use o formato 07:00.`);
     const ult = vals.map(v => !!v).lastIndexOf(true);
     if (vals.slice(0, ult + 1).some(v => !v)) return erro(`Dia ${d}: preencha os horários em ordem, sem pular.`);
     const m = vals.slice(0, ult + 1);
-    for (let i = 1; i < m.length; i++) if (toMin(m[i]) <= toMin(m[i - 1])) return erro(`Dia ${d}: ${ROT[i].toLowerCase()} precisa ser depois de ${ROT[i - 1].toLowerCase()}.`);
-    const oc = el.querySelector('select').value || null, obs = el.querySelector('.oc input').value.trim() || null;
+    if (m.length && !minutosCorridos(m)) return erro(`Dia ${d}: os horários passam de 24 horas. Confira a ordem.`);
+    const oc = el.querySelector('select').value || null, obs = el.querySelector('.obs-in').value.trim() || null;
     if (m.length || oc || obs) ups.push({colaborador_id: id, dia: iso, marcacoes: m, ocorrencia: oc, observacao: obs});
     else if (orig[iso]) dels.push(iso);
   }
@@ -939,9 +979,11 @@ function gerarHolerite(colab, ref, registros, op = {}) {
   P('201', 'HORAS EXTRAS 50%', dec(h(T.e50)), e50);
   P('200', 'HORAS EXTRAS 100%', dec(h(T.e100)), e100);
   P('205', 'HORAS EXTRAS 110%', dec(h(T.e110)), e110);
-  const {uteis, rep} = diasDSR(ref), he = r2(e50) + r2(e100) + r2(e110);
+  const hnot = T.not / HORA_NOTURNA, vnot = hnot * vh * 0.2;
+  P('25', 'ADICIONAL NOTURNO 20%', dec(hnot), vnot);
+  const {uteis, rep} = diasDSR(ref), he = r2(e50) + r2(e100) + r2(e110) + r2(vnot);
   const dsr = uteis ? he / uteis * rep : 0;
-  P('250', 'REFLEXO EXTRAS DSR', `${rep}/${uteis}`, dsr);
+  P('250', T.not ? 'REFLEXO EXTRAS/NOTURNO DSR' : 'REFLEXO EXTRAS DSR', `${rep}/${uteis}`, dsr);
   const atr = h(T.atraso) * vh;
   P('910', 'ATRASOS / FALTAS', dec(h(T.atraso)), atr, 'd');
   const tributavel = r2(it.filter(i => i.tipo === 'p').reduce((a, i) => a + i.valor, 0) - r2(atr));
@@ -1321,7 +1363,7 @@ async function lerPlanilha(arq) {
       if (hs.some(x => x === null)) { E('Ponto', n, 'horário inválido (use 07:00)'); continue; }
       const ult = hs.map(x => !!x).lastIndexOf(true), m = hs.slice(0, ult + 1);
       if (m.some(x => !x)) { E('Ponto', n, 'horários fora de ordem ou faltando no meio'); continue; }
-      if (m.some((x, i) => i && toMin(x) <= toMin(m[i - 1]))) { E('Ponto', n, 'cada horário precisa ser depois do anterior'); continue; }
+      if (m.length && !minutosCorridos(m)) { E('Ponto', n, 'o turno passa de 24 horas'); continue; }
       const oc = OCORRENCIAS.find(o => o && semAcento(o) === semAcento(v['Ocorrência'])) || null;
       if (v['Ocorrência'] && !oc) { E('Ponto', n, `ocorrência "${v['Ocorrência']}" não reconhecida`); continue; }
       pontos.push({cpf, dia, marcacoes: m, ocorrencia: oc, observacao: v['Observação'] ? String(v['Observação']) : null});

@@ -126,6 +126,7 @@ button{cursor:pointer;border:0;background:none}
 /* Painel deslizante (bottom sheet) */
 .sheet-bg{position:fixed;inset:0;background:rgba(16,36,62,.5);z-index:20;display:flex;align-items:flex-end;justify-content:center}
 .sheet{background:#fff;width:100%;max-width:480px;max-height:92vh;border-radius:18px 18px 0 0;display:flex;flex-direction:column;animation:up .22s ease-out}
+.sheet.sheet-larga{max-width:980px}
 @keyframes up{from{transform:translateY(40px);opacity:.4}}
 .sheet-h{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
 .sheet-h h3{font-size:16.5px}
@@ -216,6 +217,18 @@ table.mini tr.tot td{background:#dfe4f1;color:#2d4a9c;font-weight:700}
 .hol .decl{font-family:Arial,sans-serif;font-size:.75em;padding:8px;border-top:1px solid #333;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
 /* ---------- EDITORES DO RH ---------- */
+.ed-scroll{overflow-x:auto;margin:0 -16px;padding:0 16px;-webkit-overflow-scrolling:touch}
+table.ed{border-collapse:separate;border-spacing:0;font-size:14px;min-width:640px;width:100%}
+table.ed th,table.ed td{border-bottom:1px solid #e6e9f2;padding:3px}
+table.ed thead th{background:#2d4a9c;color:#fff;font-weight:600;font-size:12.5px;padding:7px 4px;position:sticky;top:0;z-index:2}
+table.ed tbody th{text-align:left;font-weight:600;white-space:nowrap;padding:4px 8px 4px 4px;position:sticky;left:0;background:#fff;z-index:1;font-size:13px}
+table.ed tbody th small{display:block;font-weight:500;color:var(--ink-3);font-size:11px}
+table.ed tr.cinza th,table.ed tr.cinza td{background:#f1f3f8}
+table.ed input,table.ed select{width:100%;min-width:62px;padding:7px 3px;border:1px solid #d9deea;border-radius:7px;font-size:15px;text-align:center;background:#fff;font-variant-numeric:tabular-nums}
+table.ed select{min-width:110px;font-size:13.5px}
+table.ed .obs-in{min-width:150px;text-align:left;padding-left:6px;font-size:13.5px}
+table.ed input:focus,table.ed select:focus{outline:2px solid var(--accent);border-color:transparent}
+.dl-r .nt{display:block;font-size:11px;color:#5a4bb7}
 .dia-ed{border-bottom:1px solid #eef1f6;padding:8px 0}
 .dia-ed.cinza{background:#f6f7fa;margin:0 -16px;padding:8px 16px}
 .dia-ed .h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;margin-bottom:6px}
