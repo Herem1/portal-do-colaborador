@@ -3,7 +3,7 @@
    Usado só na página de demonstração. O site real usa o Supabase.
    ===================================================== */
 (function () {
-  const LS = 'portal-colab-previa-v7';
+  const LS = 'portal-colab-previa-v8';
   const uid = () => 'u' + Math.random().toString(16).slice(2, 10) + '-0000-0000-0000-000000000000';
   const pad = n => String(n).padStart(2, '0');
   const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

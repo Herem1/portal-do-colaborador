@@ -43,6 +43,13 @@ Quem já tinha instalado o portal antes dessa função precisa rodar `supabase/a
 
 Cada colaborador pode ter uma **obra** no cadastro (ou na coluna Obra da planilha). Na aba Equipe, o filtro mostra só os colaboradores da obra escolhida, e o Resumo de horas pode sair por obra. Quem já tinha instalado o portal antes precisa rodar `supabase/obra.sql` no SQL Editor (uma vez).
 
+## Ponto automático e situação
+
+- No cadastro, cada colaborador tem um **horário padrão** por dia da semana (entrada, saída para o almoço, volta e saída).
+- Com o **ponto automático** ligado (vem ligado), todo dia de trabalho que já passou entra sozinho com esse horário. O RH só lança o que foge disso: falta (ocorrência **Falta**), atestado, folga, férias ou um horário diferente. Dias em branco no editor usam o horário padrão.
+- **Situação**: Ativo ou Desligado, com a data do desligamento. Depois dessa data o ponto automático para. Na aba Equipe dá para filtrar por situação e por obra/projeto.
+- Quem já tinha instalado o portal antes precisa rodar `supabase/ponto-automatico.sql` no SQL Editor (uma vez).
+
 ## Regras da folha de ponto
 
 - Jornada prevista por dia da semana no cadastro do colaborador (ex.: seg a qui 09:00, sex 08:00).

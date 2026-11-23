@@ -80,14 +80,14 @@ function imprimir() { try { window.print(); } catch (e) { toast('Não foi possí
 /* ---------- Supabase ---------- */
 const configurado = CFG.SUPABASE_URL && /^https:\/\//.test(CFG.SUPABASE_URL) && CFG.SUPABASE_ANON_KEY && !/COLE_AQUI/.test(CFG.SUPABASE_ANON_KEY);
 const sb = configurado ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {auth:{persistSession:true, autoRefreshToken:true}}) : null;
-const COLS = 'id,user_id,nome,cpf,codigo,cargo,cbo,departamento,filial,centro_custo,lotacao,tipo_salario,admissao,email,tel,salario,ajuda_custo,dependentes,banco,jornada,obra';
+const COLS = 'id,user_id,nome,cpf,codigo,cargo,cbo,departamento,filial,centro_custo,lotacao,tipo_salario,admissao,email,tel,salario,ajuda_custo,dependentes,banco,jornada,obra,horario,ponto_auto,situacao,demissao';
 async function q(promise) { const {data, error} = await promise; if (error) throw error; return data; }
 
 /* ---------- estado ---------- */
 let sess = null;          // {tipo:'colab', colab} | {tipo:'rh', email}
 let empresa = {nome: CFG.NOME_EMPRESA || 'Portal do Colaborador', logo: CFG.LOGO || null};
 const comLogoPadrao = e => ({...e, logo: e.logo || CFG.LOGO || null});
-let filtroObra = '', view = 'inicio', busca = '', cacheEquipe = [], renderTok = 0, mesPonto = null;
+let filtroSit = 'Ativo', filtroObra = '', view = 'inicio', busca = '', cacheEquipe = [], renderTok = 0, mesPonto = null;
 
 /* =====================================================
    LOGIN
@@ -235,6 +235,7 @@ async function render() {
     if (tok !== renderTok) return;
     $('view').innerHTML = html; $('view').dataset.v = view;
     if ($('padFolha')) iniciarPad('padFolha');
+    if ($('contEq')) contarEquipe();
   } catch (e) {
     if (tok !== renderTok) return;
     if (/JWT|session/i.test(e.message || '')) return sair();
@@ -290,6 +291,25 @@ function noturno(m) {
   return t;
 }
 const HORA_NOTURNA = 52.5; // hora noturna reduzida: 52 min 30 s
+/* ---- Horário padrão e ponto automático ----
+   Cada dia de trabalho que passou e não tem lançamento do RH conta como trabalhado no horário padrão.
+   O RH só lança o que foge disso: falta (ocorrência "Falta"), atestado, horário diferente etc. */
+const JOR_PADRAO = ['', '09:00', '09:00', '09:00', '09:00', '08:00', ''];
+const minHora = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+function horarioDia(colab, dw) {
+  if (Array.isArray(colab.horario) && colab.horario.length === 7) return (colab.horario[dw] || []).filter(Boolean);
+  const min = toMin((colab.jornada && colab.jornada.length === 7 ? colab.jornada : JOR_PADRAO)[dw]);
+  if (!min) return [];
+  return min <= 360 ? ['07:00', minHora(420 + min)] : ['07:00', '12:00', '13:00', minHora(780 + min - 300)];
+}
+const jornadaDoHorario = h => h.map(d => { const t = trabalhado(d); return t ? minHora(t) : ''; });
+const pontoAuto = c => c.ponto_auto !== false;
+const desligado = c => c.situacao === 'Desligado';
+const noContrato = (c, iso) => (!c.admissao || iso >= String(c.admissao).slice(0, 10)) && (!c.demissao || iso <= String(c.demissao).slice(0, 10));
+const mesNoContrato = (c, ref) => (!c.admissao || String(c.admissao).slice(0, 10) <= fimDoMes(ref)) && (!c.demissao || String(c.demissao).slice(0, 10) >= ref + '-01');
+// O mês tem folha? (dias lançados ou ponto automático com o colaborador contratado no mês, até hoje)
+const temFolha = (c, ref, regs) => (regs && regs.length > 0) || (pontoAuto(c) && mesNoContrato(c, ref) && ref + '-01' < agoraBR().iso);
+
 function calcularFolha(colab, ref, registros) {
   const [y] = ref.split('-').map(Number), fer = feriadosDoAno(y), hoje = agoraBR().iso;
   const porDia = Object.fromEntries((registros || []).map(r => [String(r.dia).slice(0, 10), r]));
@@ -297,10 +317,13 @@ function calcularFolha(colab, ref, registros) {
   const dias = [], T = {trab:0, prev:0, extra:0, atraso:0, e50:0, e100:0, e110:0, not:0, n20:0, n100:0, n110:0};
   for (let d = 1; d <= diasNoMes(ref); d++) {
     const iso = `${ref}-${String(d).padStart(2, '0')}`, dw = dataObj(iso).getDay(), r = porDia[iso] || {};
-    const m = (r.marcacoes || []).filter(Boolean), oc = r.ocorrencia || '', feriado = fer[iso] || (oc === 'Feriado' ? 'Feriado' : '');
-    const futuro = iso > hoje && !m.length;
+    const fora = !noContrato(colab, iso), lancado = !!porDia[iso];
+    let m = (r.marcacoes || []).filter(Boolean), auto = false;
+    if (!lancado && !fora && pontoAuto(colab) && iso < hoje && !fer[iso] && toMin(jor[dw])) { m = horarioDia(colab, dw); auto = m.length > 0; }
+    const oc = r.ocorrencia || '', feriado = fer[iso] || (oc === 'Feriado' ? 'Feriado' : '');
+    const futuro = iso >= hoje && !m.length;
     const abona = feriado || ['Sem expediente', 'Folga', 'Atestado', 'Férias'].includes(oc);
-    const prev = futuro || abona ? 0 : toMin(jor[dw]);
+    const prev = futuro || abona || fora ? 0 : toMin(jor[dw]);
     const trab = trabalhado(m), not = noturno(m);
     let extra = 0, atraso = 0;
     if (!futuro) {
@@ -313,7 +336,7 @@ function calcularFolha(colab, ref, registros) {
     if (extra) T['e' + faixa] += extra;
     if (not) T['n' + (faixa === 50 ? 20 : faixa)] += not;
     T.trab += trab; T.not += not; T.prev += prev; T.extra += extra; T.atraso += atraso;
-    dias.push({iso, d, dw, m, not, oc: oc || (fer[iso] ? '' : ''), feriado, obs: r.observacao || '', trab, prev, extra, atraso, futuro,
+    dias.push({iso, d, dw, m, not, auto, fora, oc: oc || (fer[iso] ? '' : ''), feriado, obs: r.observacao || '', trab, prev, extra, atraso, futuro,
       cinza: dw === 0 || dw === 6 || !!feriado});
   }
   return {dias, T};
@@ -369,7 +392,7 @@ function folhaHTML(colab, ref, registros, conf) {
     if (x.m.length) meio = `<div class="dl-h"><span>${x.m[0] || ''}</span><i>→</i><span>${x.m[1] || '…'}</span>${x.m.length > 2 ? `<em></em><span>${x.m[2]}</span><i>→</i><span>${x.m[3] || '…'}</span>` : ''}</div>`;
     else if (x.futuro) meio = `<div class="dl-vazio">—</div>`;
     else meio = `<div class="dl-vazio">${esc(oc || (fds ? 'Descanso' : (x.prev ? 'Sem marcação' : 'Sem expediente')))}</div>`;
-    const sub = [x.m.length && oc ? esc(oc) : '', esc(x.obs)].filter(Boolean).join(' · ');
+    const sub = [x.m.length && oc ? esc(oc) : '', esc(x.obs), x.auto ? '<span class="autot">horário padrão</span>' : '', x.fora && !x.m.length ? 'fora do período de contrato' : ''].filter(Boolean).join(' · ');
     const dir = x.futuro || (!x.trab && !x.atraso) ? '' : `<div class="dl-r"><b>${hmOu(x.trab)}</b>${x.not ? `<span class="nt">🌙 ${hm(x.not)}</span>` : ''}${x.extra ? `<span class="ex">+${hm(x.extra)}</span>` : x.atraso ? `<span class="at">−${hm(x.atraso)}</span>` : `<span class="ok">✓</span>`}</div>`;
     return `<div class="dl ${x.cinza ? 'cinza' : ''} ${!x.m.length ? 'vazio' : ''}">
       <div class="dl-d"><b>${String(x.d).padStart(2, '0')}</b><small>${DIAS[x.dw]}</small></div>
@@ -494,7 +517,7 @@ const seloAssinatura = (img, quando, codigo, ip, nome) => `<div class="selo">${i
 /* Assinatura da folha do mês */
 const dataHora = ts => { const d = new Date(ts); return d.toLocaleDateString('pt-BR', {timeZone:'America/Sao_Paulo'}) + ' às ' + d.toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); };
 // Mês fechado com marcações e ainda sem OK do colaborador?
-async function folhasPendentes(colabId, refs) {
+async function folhasPendentes(colabId, refs, colab) {
   const atual = agoraBR().iso.slice(0, 7);
   refs = [...new Set(refs)].filter(r => r < atual);
   if (!refs.length) return new Set();
@@ -504,6 +527,7 @@ async function folhasPendentes(colabId, refs) {
     q(sb.from('confirmacoes').select('ref').eq('colaborador_id', colabId))
   ]);
   const comPonto = new Set(pts.map(p => String(p.dia).slice(0, 7))), ok = new Set(confs.map(c => c.ref));
+  if (colab) refs.forEach(r => { if (temFolha(colab, r, [])) comPonto.add(r); });
   return new Set(refs.filter(r => comPonto.has(r) && !ok.has(r)));
 }
 function irParaFolha(ref) { fecharSheet(); mesPonto = ref; ir('ponto'); }
@@ -527,7 +551,7 @@ async function vInicio() {
     q(sb.from('avisos').select('*').order('criado_em', {ascending:false}).limit(5))
   ]);
   const {T} = calcularFolha(c, ref, regs), h = hs[0];
-  const pend = await folhasPendentes(c.id, [mesAnterior(), ...(h ? [h.ref] : [])]);
+  const pend = await folhasPendentes(c.id, [mesAnterior(), ...(h ? [h.ref] : [])], c);
   const p1 = [...pend].sort()[0];
   return `
   ${p1 ? `<div class="card" style="border-color:#f1d59a;background:var(--amber-soft)"><div class="card-b">
@@ -557,7 +581,7 @@ async function vPonto() {
     q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', c.id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref))),
     q(sb.from('confirmacoes').select('ref,confirmado_em,assinatura,codigo,ip').eq('colaborador_id', c.id).eq('ref', ref).maybeSingle())
   ]);
-  const podeConfirmar = ref < atual && regs.length;
+  const podeConfirmar = ref < atual && temFolha(c, ref, regs);
   const caixaOk = !podeConfirmar ? (ref === atual ? '<div class="notice-mes muted no-print" style="padding:0 4px 10px">Mês em andamento. A confirmação fica disponível quando o mês fechar.</div>' : '')
     : conf ? `<div class="card no-print" style="border-color:#bfe6d2;background:var(--green-soft)"><div class="card-b" style="color:var(--green);font-weight:600">✓ Você assinou esta folha em ${dataHora(conf.confirmado_em)}.</div></div>`
     : `<div class="card no-print" style="border-color:#f1d59a"><div class="card-b">
@@ -586,7 +610,7 @@ async function vPonto() {
 async function vHolerites() {
   const [l, as] = await Promise.all([q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', sess.colab.id).order('ref', {ascending:false})),
     q(sb.from('assinaturas_holerite').select('holerite_id').eq('colaborador_id', sess.colab.id))]);
-  const pend = await folhasPendentes(sess.colab.id, l.map(h => h.ref)), assinados = new Set(as.map(a => a.holerite_id));
+  const pend = await folhasPendentes(sess.colab.id, l.map(h => h.ref), sess.colab), assinados = new Set(as.map(a => a.holerite_id));
   return `<div class="card">${l.length ? l.map(h => pend.has(h.ref)
       ? `<button class="item" onclick="irParaFolha('${h.ref}');toast('Assine a folha de ${refLabel(h.ref)} para abrir o holerite.')">
       <div><div class="t">🔒 ${refLabel(h.ref)}</div><div class="d" style="color:var(--amber)">Assine a folha de ponto para abrir</div></div><span class="chev">${sv(IC.chev)}</span></button>`
@@ -599,7 +623,7 @@ async function verHolerite(id) {
   try {
     const [h, ass] = await Promise.all([q(sb.from('holerites').select('*').eq('id', id).single()), q(sb.from('assinaturas_holerite').select('*').eq('holerite_id', id).maybeSingle())]);
     const c = sess.tipo === 'colab' ? sess.colab : (cacheEquipe.find(x => x.id === h.colaborador_id) || {});
-    if (sess.tipo === 'colab' && (await folhasPendentes(c.id, [h.ref])).has(h.ref)) { irParaFolha(h.ref); return toast(`Assine a folha de ${refLabel(h.ref)} para abrir o holerite.`); }
+    if (sess.tipo === 'colab' && (await folhasPendentes(c.id, [h.ref], c)).has(h.ref)) { irParaFolha(h.ref); return toast(`Assine a folha de ${refLabel(h.ref)} para abrir o holerite.`); }
     const assinar = sess.tipo === 'colab' && !ass;
     document.body.classList.add('imprimindo-sheet');
     sheet(`Holerite · ${refLabel(h.ref)}`, holeriteHTML(h, c, ass) + (assinar ? `<div class="card no-print" id="assinarHol" style="border-color:#f1d59a;margin-top:14px"><div class="card-b">
@@ -641,6 +665,11 @@ async function vPerfil() {
     <button class="btn btn-danger" onclick="sair()">Sair</button>
   </div>`;
 }
+function horarioTexto(c) {
+  const grupos = [];
+  [1, 2, 3, 4, 5, 6, 0].forEach(i => { const h = horarioDia(c, i), t = h.length ? h.join(' – ').replace(/^(\S+) – (\S+) – (\S+) – (\S+)$/, '$1–$2 · $3–$4') : ''; if (!t) return; const g = grupos.find(x => x.t === t); if (g) g.d.push(i); else grupos.push({t, d: [i]}); });
+  return grupos.map(g => `${g.d.length > 2 ? DIAS[g.d[0]] + ' a ' + DIAS[g.d[g.d.length - 1]] : g.d.map(i => DIAS[i]).join(' e ')}: ${g.t}`).join(' | ') || '—';
+}
 function jornadaTexto(j) {
   if (!j || j.length !== 7) return '';
   return [1, 2, 3, 4, 5, 6, 0].filter(i => j[i]).map(i => `${DIAS[i]} ${hm(toMin(j[i]))}`).join(' · ') || '—';
@@ -677,23 +706,24 @@ async function vEquipe() {
     q(sb.from('confirmacoes').select('colaborador_id').eq('ref', ant))]);
   const com = new Set(pts.map(p => p.colaborador_id)), ok = new Set(confs.map(c => c.colaborador_id));
   if (filtroObra && !obras().includes(filtroObra)) filtroObra = '';
-  statusOk = Object.fromEntries(l.map(c => [c.id, !com.has(c.id) ? '' : ok.has(c.id) ? 'ok' : 'pend']));
+  statusOk = Object.fromEntries(l.map(c => [c.id, !(com.has(c.id) || temFolha(c, ant, [])) ? '' : ok.has(c.id) ? 'ok' : 'pend']));
   return `
   <div class="row2" style="margin-bottom:10px"><button class="btn btn-ghost" onclick="abrirImportacao()">Importar planilha (Excel)</button><button class="btn btn-ghost" onclick="abrirResumo()">Resumo de horas (Excel)</button></div>
   <div class="filtros"><input class="srch" type="search" placeholder="Buscar por nome, CPF ou cargo" aria-label="Buscar colaborador" value="${esc(busca)}" oninput="busca=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()">
-    ${obras().length ? `<select class="srch" aria-label="Filtrar por obra" onchange="filtroObra=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()"><option value="">Todas as obras</option>${obras().map(o => `<option ${o === filtroObra ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>` : ''}</div>
-  <div class="sec-t" id="contEq">${l.length} colaborador${l.length === 1 ? '' : 'es'}</div>
+    <select class="srch" aria-label="Filtrar por situação" onchange="filtroSit=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()">${[['Ativo', 'Ativos'], ['Desligado', 'Desligados'], ['', 'Todos']].map(([v, lb]) => `<option value="${v}" ${v === filtroSit ? 'selected' : ''}>${lb} (${l.filter(c => !v || (c.situacao || 'Ativo') === v).length})</option>`).join('')}</select>
+    ${obras().length ? `<select class="srch" aria-label="Filtrar por obra" onchange="filtroObra=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()"><option value="">Todas as obras / projetos</option>${obras().map(o => `<option ${o === filtroObra ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>` : ''}</div>
+  <div class="sec-t" id="contEq"></div>
   <div class="card" id="lista">${listaEquipe()}</div>
   <button class="fab" aria-label="Adicionar colaborador" onclick="editarColab()">${sv(IC.plus, 24)}</button>`;
 }
 const obras = () => [...new Set(cacheEquipe.map(c => (c.obra || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-function contarEquipe() { const n = document.querySelectorAll('#lista .item').length, e = $('contEq'); if (e) e.textContent = `${n} colaborador${n === 1 ? '' : 'es'}${filtroObra ? ' · ' + filtroObra : ''}`; }
+function contarEquipe() { const n = document.querySelectorAll('#lista .item').length, e = $('contEq'); if (e) e.textContent = `${n} colaborador${n === 1 ? '' : 'es'}${filtroSit ? ' ' + (filtroSit === 'Ativo' ? 'ativo' : 'desligado') + (n === 1 ? '' : 's') : ''}${filtroObra ? ' · ' + filtroObra : ''}`; }
 function listaEquipe() {
   const t = busca.toLowerCase().trim(), dq = soDig(busca);
-  const l = cacheEquipe.filter(c => !filtroObra || (c.obra || '') === filtroObra).filter(c => !t || c.nome.toLowerCase().includes(t) || (c.cargo || '').toLowerCase().includes(t) || (dq && c.cpf.includes(dq)));
+  const l = cacheEquipe.filter(c => (!filtroSit || (c.situacao || 'Ativo') === filtroSit) && (!filtroObra || (c.obra || '') === filtroObra)).filter(c => !t || c.nome.toLowerCase().includes(t) || (c.cargo || '').toLowerCase().includes(t) || (dq && c.cpf.includes(dq)));
   return l.length ? l.map(c => `<button class="item" onclick="verColab('${c.id}')"><div class="av">${esc(ini(c.nome))}</div>
       <div style="min-width:0;flex:1"><div class="t">${esc(c.nome)}</div><div class="d">${esc(c.cargo || 'Sem cargo')}${c.obra ? ' · ' + esc(c.obra) : ''} · ${fmtCPF(c.cpf)}</div>
-      <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${statusOk[c.id] === 'ok' ? `<span class="tag t-ok">Folha assinada · ${MESES[+mesAnterior().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? `<span class="tag t-neutral">Folha de ${MESES[+mesAnterior().slice(5) - 1]} sem assinatura</span>` : ''}</div></div>
+      <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${desligado(c) ? `<span class="tag t-neutral">Desligado${c.demissao ? ' em ' + isoBR(c.demissao) : ''}</span>` : c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${desligado(c) ? '' : statusOk[c.id] === 'ok' ? `<span class="tag t-ok">Folha assinada · ${MESES[+mesAnterior().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? `<span class="tag t-neutral">Folha de ${MESES[+mesAnterior().slice(5) - 1]} sem assinatura</span>` : ''}</div></div>
       <span class="chev">${sv(IC.chev)}</span></button>`).join('')
     : `<div class="empty">${cacheEquipe.length ? 'Ninguém encontrado.' : 'Nenhum colaborador cadastrado ainda.<br>Toque no botão + para adicionar.'}</div>`;
 }
@@ -710,9 +740,9 @@ async function verColab(id, refSel) {
       q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref)))
     ]);
     const assDe = hid => as.find(a => a.holerite_id === hid);
-    const r = resumoColab(c, ref, regs), T = r.T, cf = confs.find(x => x.ref === ref), hRef = hs.find(h => h.ref === ref);
+    const tem = temFolha(c, ref, regs), r = resumoColab(c, ref, regs), T = r.T, cf = confs.find(x => x.ref === ref), hRef = hs.find(h => h.ref === ref);
     const kpi = (lb, v, cls = '') => `<div><small>${lb}</small><b class="${cls}">${v}</b></div>`;
-    const statusFolha = !regs.length ? `<span class="tag t-neutral">Folha não lançada</span>`
+    const statusFolha = !tem ? `<span class="tag t-neutral">Folha não lançada</span>`
       : cf ? `<span class="tag t-ok">✓ Assinada em ${dataHora(cf.confirmado_em)}</span>`
       : ref >= atual ? `<span class="tag t-neutral">Mês em andamento</span>` : `<span class="tag t-warn">Aguardando assinatura</span>`;
     const statusHol = !hRef ? `<span class="tag t-neutral">Sem holerite</span>`
@@ -724,7 +754,7 @@ async function verColab(id, refSel) {
         <div style="min-width:0">
           <div class="cx-nome">${esc(c.nome)}</div>
           <div class="muted">${esc(c.cargo || 'Sem cargo')}${c.departamento ? ' · ' + esc(c.departamento) : ''} · CPF ${fmtCPF(c.cpf)}</div>
-          <div class="cx-tags">${c.user_id ? '<span class="tag t-ok">Acesso ativo</span>' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${c.obra ? `<span class="tag t-info">Obra: ${esc(c.obra)}</span>` : ''}${c.admissao ? `<span class="tag t-neutral">Admissão ${isoBR(c.admissao)}</span>` : ''}</div>
+          <div class="cx-tags">${desligado(c) ? `<span class="tag t-neutral">Desligado${c.demissao ? ' em ' + isoBR(c.demissao) : ''}</span>` : ''}${c.user_id ? '<span class="tag t-ok">Acesso ativo</span>' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${pontoAuto(c) ? '<span class="tag t-info">Ponto automático</span>' : ''}${c.obra ? `<span class="tag t-info">Obra: ${esc(c.obra)}</span>` : ''}${c.admissao ? `<span class="tag t-neutral">Admissão ${isoBR(c.admissao)}</span>` : ''}</div>
         </div>
         <button class="btn btn-ghost btn-sm cx-edit" onclick="editarColab('${id}')">Editar dados</button>
       </div>
@@ -738,7 +768,7 @@ async function verColab(id, refSel) {
       <div class="cx-grid">
         <div class="card cx-card"><div class="card-b">
           <div class="cx-t"><span>Folha de ponto</span>${statusFolha}</div>
-          ${regs.length ? `<div class="fp-kpi cx-kpi">
+          ${tem ? `<div class="fp-kpi cx-kpi">
             ${kpi('Trabalhadas', hm(T.trab))}${kpi('Normais', hm(r.normais))}
             ${kpi('Extras', hmOu(T.extra), 'ex')}${kpi('Atrasos', hmOu(r.atraso), r.atraso ? 'at' : '')}
             ${kpi('Faltas', r.faltas ? r.faltas + (r.faltas === 1 ? ' dia' : ' dias') : '-', r.faltas ? 'at' : '')}${kpi('Noturno', hmOu(T.not))}
@@ -747,8 +777,8 @@ async function verColab(id, refSel) {
           ${r.faltas ? `<div class="cx-linha"><span>Dias das faltas</span><b>${esc(r.datasFalta)}</b></div>` : ''}
           ${r.ocorr ? `<div class="cx-linha"><span>Ocorrências</span><b>${esc(r.ocorr)}</b></div>` : ''}` : `<div class="muted" style="margin:6px 0 4px">Nenhum dia lançado em ${refLabel(ref)}.</div>`}
           <div class="cx-acoes">
-            <button class="btn btn-primary btn-sm" onclick="editarFolha('${id}','${ref}')">${regs.length ? 'Editar folha' : 'Preencher folha'}</button>
-            ${regs.length ? `<button class="btn btn-ghost btn-sm" onclick="verFolhaRH('${id}','${ref}')">Ver folha completa</button>` : ''}
+            <button class="btn btn-primary btn-sm" onclick="editarFolha('${id}','${ref}')">${tem ? 'Lançar faltas / ajustes' : 'Preencher folha'}</button>
+            ${tem ? `<button class="btn btn-ghost btn-sm" onclick="verFolhaRH('${id}','${ref}')">Ver folha completa</button>` : ''}
           </div>
         </div></div>
 
@@ -765,7 +795,7 @@ async function verColab(id, refSel) {
         <div class="card cx-card"><div class="card-b">
           <div class="cx-t"><span>Dados</span></div>
           ${kv('Salário base', BRL(c.salario))}${+c.ajuda_custo ? kv('Ajuda de custo', BRL(c.ajuda_custo)) : ''}
-          ${kv('Jornada', jornadaCurta)}${kv('Centro de custo', c.centro_custo)}${kv('Código', c.codigo)}
+          ${kv('Horário', horarioTexto(c))}${kv('Centro de custo', c.centro_custo)}${kv('Código', c.codigo)}
           ${kv('Telefone', c.tel)}${kv('E-mail', c.email)}
         </div></div>
 
@@ -813,9 +843,14 @@ function editarColab(id) {
     <div class="field"><label for="f_obra">Obra</label><input id="f_obra" list="listaObras" value="${esc(c.obra || '')}" placeholder="Ex.: Residencial Lago Azul"><datalist id="listaObras">${obras().map(o => `<option value="${esc(o)}">`).join('')}</datalist></div>
     <div class="row2">${f('centro_custo', 'Centro de custo (folha)')}${f('lotacao', 'CC do holerite')}</div>
     <div class="row2">${f('admissao', 'Admissão', 'date')}<div class="field"><label for="f_tipo_salario">Tipo</label><select id="f_tipo_salario">${['Mensalista', 'Horista', 'Diarista'].map(o => `<option ${o === c.tipo_salario ? 'selected' : ''}>${o}</option>`).join('')}</select></div></div>
-    <div class="field"><label>Jornada prevista por dia (deixe vazio nos dias sem expediente)</label>
-      <div class="jor">${DIAS.map((d, i) => `<div><label for="j${i}">${d}</label><input id="j${i}" inputmode="numeric" placeholder="—" value="${esc(jor[i] || '')}" maxlength="5"></div>`).join('')}</div>
-      <div class="muted" style="font-size:12px;margin-top:4px">Horas no formato 09:00. Ex.: seg a qui 09:00, sex 08:00.</div></div>
+    <div class="row2"><div class="field"><label for="f_situacao">Situação</label><select id="f_situacao" onchange="$('demBox').style.display=this.value==='Desligado'?'':'none'">${['Ativo', 'Desligado'].map(o => `<option ${o === (c.situacao || 'Ativo') ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+      <div class="field" id="demBox" style="${c.situacao === 'Desligado' ? '' : 'display:none'}"><label for="f_demissao">Data do desligamento</label><input id="f_demissao" type="date" value="${esc(c.demissao || '')}"></div></div>
+    <div class="field"><label>Horário padrão (deixe a linha vazia nos dias sem expediente)</label>
+      <table class="hor"><thead><tr><th></th><th>Entrada</th><th>Saída</th><th>Entrada</th><th>Saída</th></tr></thead><tbody>
+      ${[1, 2, 3, 4, 5, 6, 0].map(i => { const h = horarioDia(c, i); return `<tr><th>${DIAS[i]}</th>${[0, 1, 2, 3].map(k => `<td><input id="h${i}_${k}" inputmode="numeric" maxlength="5" value="${esc(h[k] || '')}" onblur="this.value=normHora(this.value)??this.value"></td>`).join('')}</tr>`; }).join('')}
+      </tbody></table>
+      <button type="button" class="linkbtn" style="font-size:13px" onclick="copiarSegunda()">Copiar o horário de segunda para terça a quinta</button>
+      <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:10px"><input type="checkbox" id="f_ponto_auto" ${pontoAuto(c) ? 'checked' : ''} style="width:20px;height:20px;flex:none"> <span><b>Ponto automático</b>: todo dia de trabalho já entra com este horário. O RH só lança faltas e mudanças.</span></label></div>
     <div class="row2">${f('salario', 'Salário base (R$)', 'number', 'step="0.01" min="0" inputmode="decimal"')}${f('ajuda_custo', 'Ajuda de custo (R$)', 'number', 'step="0.01" min="0" inputmode="decimal"')}</div>
     <div class="row2">${f('dependentes', 'Dependentes (IRRF)', 'number', 'step="1" min="0" inputmode="numeric"')}<div></div></div>
     <div class="row2">${f('email', 'E-mail', 'email')}${f('tel', 'Telefone', 'tel')}</div>
@@ -824,6 +859,7 @@ function editarColab(id) {
     ${id ? `<button class="btn btn-danger" style="margin-top:6px" onclick="excluirColab('${id}')">Excluir colaborador</button>` : '<p class="muted">Depois de salvar, aparece o código de primeiro acesso para enviar à pessoa.</p>'}`,
     [['Cancelar', 'ghost', id ? `verColab('${id}')` : 'fecharSheet()'], ['Salvar', 'primary', `salvarColab('${id || ''}',this)`]]);
 }
+function copiarSegunda() { [2, 3, 4].forEach(i => [0, 1, 2, 3].forEach(k => $(`h${i}_${k}`).value = $(`h1_${k}`).value)); toast('Horário copiado para terça, quarta e quinta.'); }
 const normHora = v => { v = String(v || '').trim(); if (!v) return ''; const d = soDig(v); if (!d) return null; const h = d.length <= 2 ? +d : +d.slice(0, d.length - 2), m = d.length <= 2 ? 0 : +d.slice(-2); if (h > 23 || m > 59) return null; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; };
 async function salvarColab(id, btn) {
   const v = k => $('f_' + k).value.trim(), e = $('cErr');
@@ -831,11 +867,21 @@ async function salvarColab(id, btn) {
   const cpf = soDig(v('cpf'));
   if (!v('nome')) return erro('Informe o nome.');
   if (cpf.length !== 11) return erro('O CPF precisa ter 11 dígitos.');
-  const jornada = DIAS.map((_, i) => normHora($('j' + i).value));
-  if (jornada.some(x => x === null)) return erro('Jornada: use o formato 09:00 em cada dia.');
+  const horario = [];
+  for (let i = 0; i < 7; i++) {
+    const vals = [0, 1, 2, 3].map(k => normHora($(`h${i}_${k}`).value));
+    if (vals.some(x => x === null)) return erro(`Horário de ${DIAS[i]}: use o formato 07:00.`);
+    const ult = vals.map(x => !!x).lastIndexOf(true), h = vals.slice(0, ult + 1);
+    if (h.some(x => !x) || h.length % 2) return erro(`Horário de ${DIAS[i]}: preencha entrada e saída (e o almoço, se tiver).`);
+    if (h.length && !minutosCorridos(h)) return erro(`Horário de ${DIAS[i]}: confira a ordem dos horários.`);
+    horario.push(h);
+  }
+  const jornada = jornadaDoHorario(horario);
+  const situacao = $('f_situacao').value, demissao = situacao === 'Desligado' ? (v('demissao') || null) : null;
+  if (situacao === 'Desligado' && !demissao) return erro('Informe a data do desligamento.');
   const o = k => v(k) || null;
   const dados = {nome: v('nome'), codigo: o('codigo'), cargo: o('cargo'), cbo: o('cbo'), departamento: o('departamento'), filial: o('filial'), centro_custo: o('centro_custo'), lotacao: o('lotacao'), obra: o('obra'),
-    tipo_salario: v('tipo_salario'), admissao: o('admissao'), jornada, email: o('email'), tel: o('tel'), salario: +v('salario') || 0, ajuda_custo: +v('ajuda_custo') || 0, dependentes: Math.max(0, Math.round(+v('dependentes') || 0)), banco: o('banco')};
+    tipo_salario: v('tipo_salario'), admissao: o('admissao'), jornada, horario, ponto_auto: $('f_ponto_auto').checked, situacao, demissao, email: o('email'), tel: o('tel'), salario: +v('salario') || 0, ajuda_custo: +v('ajuda_custo') || 0, dependentes: Math.max(0, Math.round(+v('dependentes') || 0)), banco: o('banco')};
   await comBotao(btn, async () => {
     try {
       let novoId = id;
@@ -876,14 +922,16 @@ async function editarFolha(id, ref) {
       <div class="t4">${ROT.map((r, i) => `<input id="pd${i}" inputmode="numeric" placeholder="${['07:00', '12:00', '13:00', '17:00'][i]}" aria-label="${r} padrão">`).join('')}</div>
       <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="preencherPadrao()">Copiar para os dias de trabalho vazios</button>
     </div></div>
+    ${pontoAuto(c) ? `<div class="aviso-auto">⏱ <b>Ponto automático ligado.</b> Dias em branco contam como trabalhados no horário padrão (o cinza claro). Lance só o que mudou: horário diferente, ou escolha <b>Falta</b>, Atestado, Folga etc. em Ocorrência.</div>` : ''}
     <div class="muted" style="font-size:12.5px;margin:2px 2px 8px">Digite só números (0700 vira 07:00). Turno que passa da meia-noite pode: ex. entrada 22:00 e saída 06:00. Também dá para copiar as horas de uma planilha do Excel e colar na primeira célula.</div>
     <div class="ed-scroll"><table class="ed"><thead><tr><th>Dia</th><th>Entrada</th><th>Saída</th><th>Entrada</th><th>Saída</th><th>Ocorrência</th><th>Observação</th></tr></thead><tbody>`;
   for (let d = 1; d <= diasNoMes(ref); d++) {
     const iso = `${ref}-${String(d).padStart(2, '0')}`, dw = dataObj(iso).getDay(), r = edFolha.orig[iso] || {}, m = r.marcacoes || [];
     const cinza = dw === 0 || dw === 6 || fer[iso];
+    const ph = !edFolha.orig[iso] && pontoAuto(c) && noContrato(c, iso) && !fer[iso] && toMin(jor[dw]) ? horarioDia(c, dw) : [];
     html += `<tr class="${cinza ? 'cinza' : ''}" data-iso="${iso}" data-trab="${jor[dw] && !fer[iso] ? 1 : 0}">
       <th title="${esc(fer[iso] || '')}">${String(d).padStart(2, '0')}/${ref.slice(5, 7)}<small>${DIAS[dw]}${fer[iso] ? ' · feriado' : ''}</small></th>
-      ${ROT.map((rt, i) => `<td><input class="hr-in" inputmode="numeric" aria-label="${rt} ${d}" value="${esc(m[i] || '')}" maxlength="5" data-l="${d - 1}" data-c="${i}" onblur="this.value=normHora(this.value)??this.value" onkeydown="navFolha(event,this)" onpaste="colarFolha(event,this)"></td>`).join('')}
+      ${ROT.map((rt, i) => `<td><input class="hr-in" inputmode="numeric" aria-label="${rt} ${d}" value="${esc(m[i] || '')}" placeholder="${esc(ph[i] || '')}" maxlength="5" data-l="${d - 1}" data-c="${i}" onblur="this.value=normHora(this.value)??this.value" onkeydown="navFolha(event,this)" onpaste="colarFolha(event,this)"></td>`).join('')}
       <td><select aria-label="Ocorrência ${d}" data-l="${d - 1}" data-c="4">${OCORRENCIAS.map(o => `<option value="${o}" ${o === (r.ocorrencia || '') ? 'selected' : ''}>${o || '—'}</option>`).join('')}</select></td>
       <td><input class="obs-in" aria-label="Observação ${d}" value="${esc(r.observacao || '')}" maxlength="80" data-l="${d - 1}" data-c="5" onkeydown="navFolha(event,this)" onpaste="colarFolha(event,this)"></td>
     </tr>`;
@@ -1069,7 +1117,7 @@ async function calcularPelaFolha(colabId, hid, btn) {
       const [regs, ex] = await Promise.all([
         q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', colabId).gte('dia', ref + '-01').lte('dia', fimDoMes(ref))),
         q(sb.from('holerites').select('id,obs').eq('colaborador_id', colabId).eq('ref', ref).maybeSingle())]);
-      if (!regs.length) { e.textContent = `Não há folha de ponto lançada em ${refLabel(ref)}. Preencha a folha primeiro.`; return e.classList.remove('hide'); }
+      if (!temFolha(c, ref, regs)) { e.textContent = `Não há folha de ponto em ${refLabel(ref)}. Preencha a folha primeiro.`; return e.classList.remove('hide'); }
       const g = gerarHolerite(c, ref, regs, {dependentes: dep, adiantamento: adiant});
       const id = hid || (ex && ex.id) || 0;
       rascunho = {id, colabId, ref, obs: rascunho && rascunho.id === id && rascunho.colabId === colabId ? rascunho.obs : (ex && ex.obs) || '', itens: g.itens, rodape: g.rodape, calc: g.info};
@@ -1273,7 +1321,7 @@ function carregarXLSX() {
   });
 }
 const ABAS = {
-  colab: ['CPF', 'Nome', 'Código', 'Cargo', 'Obra', 'CBO', 'Departamento', 'Filial', 'Centro de custo', 'CC holerite', 'Tipo', 'Admissão', 'Salário', 'Ajuda de custo', 'Dependentes', 'E-mail', 'Telefone', 'Banco', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'],
+  colab: ['CPF', 'Nome', 'Código', 'Cargo', 'Obra', 'CBO', 'Departamento', 'Filial', 'Centro de custo', 'CC holerite', 'Tipo', 'Admissão', 'Salário', 'Ajuda de custo', 'Dependentes', 'E-mail', 'Telefone', 'Banco', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom', 'Situação', 'Desligamento'],
   ponto: ['CPF', 'Data', 'Entrada', 'Saída almoço', 'Retorno almoço', 'Saída', 'Ocorrência', 'Observação'],
   hol: ['CPF', 'Mês', 'Código', 'Descrição', 'Referência', 'Vencimento', 'Desconto'],
   bases: ['CPF', 'Mês', 'Salário base', 'Sal. contr. INSS', 'Base cálc. FGTS', 'FGTS do mês', 'Base cálc. IRRF', 'Faixa IRRF']
@@ -1295,8 +1343,8 @@ function modeloPlanilha() {
       ['', 'Importar de novo o mesmo CPF e mês substitui o holerite inteiro.'],
       ['Bases holerite', 'Opcional: rodapé do holerite (uma linha por CPF e mês).']],
     Colaboradores: [ABAS.colab,
-      ['111.111.111-11', 'Maria da Silva Exemplo', '30', 'Pedreira', 'Obra Centro', '715210', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '08/06/2025', '2800,00', '0', '1', 'maria@exemplo.com', '(00) 90000-0000', 'Banco 001 Ag 0001 CC 12345-6', '09:00', '09:00', '09:00', '09:00', '08:00', '', ''],
-      ['222.222.222-22', 'João Pereira Exemplo', '31', 'Servente', 'Obra Centro', '717020', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '01/02/2026', '1900,00', '150,00', '0', '', '', '', '09:00', '09:00', '09:00', '09:00', '08:00', '', '']],
+      ['111.111.111-11', 'Maria da Silva Exemplo', '30', 'Pedreira', 'Obra Centro', '715210', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '08/06/2025', '2800,00', '0', '1', 'maria@exemplo.com', '(00) 90000-0000', 'Banco 001 Ag 0001 CC 12345-6', '09:00', '09:00', '09:00', '09:00', '08:00', '', '', 'Ativo', ''],
+      ['222.222.222-22', 'João Pereira Exemplo', '31', 'Servente', 'Obra Centro', '717020', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '01/02/2026', '1900,00', '150,00', '0', '', '', '', '09:00', '09:00', '09:00', '09:00', '08:00', '', '', 'Ativo', '']],
     Ponto: [ABAS.ponto,
       ['111.111.111-11', d(1), '06:58', '11:40', '12:42', '16:58', '', ''],
       ['111.111.111-11', d(2), '07:00', '11:40', '12:40', '19:01', '', 'Efetivo até 19h'],
@@ -1349,8 +1397,8 @@ async function baixarResumo(btn) {
       const cab = ['Colaborador', 'CPF', 'Cargo', 'Obra', 'Centro de custo', 'Dias trabalhados', 'Horas previstas', 'Horas trabalhadas', 'Horas normais',
         'Extras 50%', 'Extras 100%', 'Extras 110%', 'Total de extras', 'Atrasos', 'Faltas (dias)', 'Horas de falta', 'Dias das faltas',
         'Noturno 20%', 'Noturno 100%', 'Noturno 110%', 'Total noturno', 'Outras ocorrências', 'Folha assinada'];
-      const linhas = equipe.filter(c => porColab[c.id] && (!obraSel || (c.obra || '') === obraSel)).sort((a, b) => (a.obra || '').localeCompare(b.obra || '') || a.nome.localeCompare(b.nome)).map(c => {
-        const r = resumoColab(c, ref, porColab[c.id]), T = r.T;
+      const linhas = equipe.filter(c => temFolha(c, ref, porColab[c.id]) && (!obraSel || (c.obra || '') === obraSel)).sort((a, b) => (a.obra || '').localeCompare(b.obra || '') || a.nome.localeCompare(b.nome)).map(c => {
+        const r = resumoColab(c, ref, porColab[c.id] || []), T = r.T;
         return [c.nome, fmtCPF(c.cpf), c.cargo || '', c.obra || '', c.centro_custo || '', r.trabalhados, H(T.prev), H(T.trab), H(r.normais),
           H(T.e50), H(T.e100), H(T.e110), H(T.extra), H(r.atraso), r.faltas, H(r.minFalta), r.datasFalta,
           H(T.n20), H(T.n100), H(T.n110), H(T.not), r.ocorr, assin[c.id] ? 'Sim · ' + dataHora(assin[c.id]) : 'Não'];
@@ -1449,7 +1497,11 @@ async function lerPlanilha(arq) {
       const d = {nome: v.Nome, codigo: String(v['Código']), cargo: v.Cargo, obra: v.Obra ? String(v.Obra).trim() : '', cbo: String(v.CBO), departamento: String(v.Departamento), filial: String(v.Filial),
         centro_custo: v['Centro de custo'], lotacao: v['CC holerite'], tipo_salario: v.Tipo, admissao: adm, salario: sal, ajuda_custo: aj, dependentes: v.Dependentes === '' || v.Dependentes == null ? '' : Math.max(0, Math.round(+String(v.Dependentes).replace(',', '.') || 0)), email: v['E-mail'], tel: String(v.Telefone), banco: v.Banco};
       Object.keys(d).forEach(k => { if (d[k] === '' || d[k] == null) delete d[k]; });
-      if (temJornada) d.jornada = jor;
+      if (temJornada) { d.jornada = jor; d.horario = null; }
+      const sit = semAcento(v['Situação'] || ''), dem = lerData(v.Desligamento);
+      if (dem === null) { E('Colaboradores', n, 'data de desligamento inválida (use dd/mm/aaaa)'); continue; }
+      if (sit) { if (!['ativo', 'desligado', 'demitido'].includes(sit)) { E('Colaboradores', n, 'situação deve ser Ativo ou Desligado'); continue; } d.situacao = sit === 'ativo' ? 'Ativo' : 'Desligado'; if (d.situacao === 'Ativo') d.demissao = null; }
+      if (dem) { d.demissao = dem; d.situacao = 'Desligado'; }
       cpfsNaPlanilha.add(cpf);
       if (porCPF[cpf]) atualiza.push({id: porCPF[cpf].id, cpf, d});
       else { if (!d.nome) { E('Colaboradores', n, 'nome obrigatório para cadastrar'); continue; } if (!temJornada) d.jornada = ['', '09:00', '09:00', '09:00', '09:00', '08:00', '']; novos.push({cpf, ...d}); }

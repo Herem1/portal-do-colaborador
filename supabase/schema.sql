@@ -40,6 +40,10 @@ create table if not exists public.colaboradores (
 -- dependentes para o IRRF (coluna nova; o "if not exists" deixa rodar o script de novo)
 alter table public.colaboradores add column if not exists dependentes int not null default 0;
 alter table public.colaboradores add column if not exists obra text;   -- obra onde o colaborador trabalha
+alter table public.colaboradores add column if not exists horario jsonb;   -- horário padrão por dia (dom..sáb)
+alter table public.colaboradores add column if not exists ponto_auto boolean not null default true;
+alter table public.colaboradores add column if not exists situacao text not null default 'Ativo';
+alter table public.colaboradores add column if not exists demissao date;
 
 create table if not exists public.pontos (
   id bigserial primary key,
@@ -224,7 +228,8 @@ create policy "avisos: rh grava" on public.avisos for all to authenticated
 -- Ninguém lê o código de acesso direto da tabela (o RH usa a função codigo_acesso).
 revoke select on public.colaboradores from anon, authenticated;
 grant select (id, user_id, nome, cpf, codigo, cargo, cbo, departamento, filial, centro_custo, lotacao, tipo_salario,
-              admissao, email, tel, salario, ajuda_custo, dependentes, banco, jornada, criado_em, obra)
+              admissao, email, tel, salario, ajuda_custo, dependentes, banco, jornada, criado_em, obra,
+              horario, ponto_auto, situacao, demissao)
   on public.colaboradores to authenticated;
 
 -- Permissões das tabelas (projetos novos do Supabase não dão essas permissões sozinhos)
@@ -232,7 +237,8 @@ grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on public.admins, public.empresa, public.pontos, public.holerites, public.confirmacoes, public.avisos to authenticated;
 grant insert, update, delete on public.colaboradores to authenticated;
 grant select (id, user_id, nome, cpf, codigo, cargo, cbo, departamento, filial, centro_custo, lotacao, tipo_salario,
-              admissao, email, tel, salario, ajuda_custo, dependentes, banco, jornada, criado_em, obra)
+              admissao, email, tel, salario, ajuda_custo, dependentes, banco, jornada, criado_em, obra,
+              horario, ponto_auto, situacao, demissao)
   on public.colaboradores to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
