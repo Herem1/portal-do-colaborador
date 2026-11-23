@@ -693,45 +693,89 @@ function listaEquipe() {
       <span class="chev">${sv(IC.chev)}</span></button>`).join('')
     : `<div class="empty">${cacheEquipe.length ? 'Ninguém encontrado.' : 'Nenhum colaborador cadastrado ainda.<br>Toque no botão + para adicionar.'}</div>`;
 }
-async function verColab(id) {
+async function verColab(id, refSel) {
   const c = cacheEquipe.find(x => x.id === id); if (!c) return;
+  const atual = agoraBR().iso.slice(0, 7), ant = mesAnterior(), ref = refSel || ant;
   sheetCarregando(esc(c.nome));
   try {
-    const [hs, confs, cod, as] = await Promise.all([
+    const [hs, confs, cod, as, regs] = await Promise.all([
       q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', id).order('ref', {ascending:false})),
-      c.user_id ? q(sb.from('confirmacoes').select('ref,confirmado_em').eq('colaborador_id', id)) : Promise.resolve([]),
+      q(sb.from('confirmacoes').select('ref,confirmado_em').eq('colaborador_id', id)),
       c.user_id ? Promise.resolve(null) : q(sb.rpc('codigo_acesso', {p_colab: id})),
-      q(sb.from('assinaturas_holerite').select('holerite_id,assinado_em').eq('colaborador_id', id))
+      q(sb.from('assinaturas_holerite').select('holerite_id,assinado_em').eq('colaborador_id', id)),
+      q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref)))
     ]);
     const assDe = hid => as.find(a => a.holerite_id === hid);
-    const atual = agoraBR().iso.slice(0, 7), ant = mesAnterior();
-    sheet(esc(c.nome), `
-      <div class="muted" style="margin-bottom:12px">${esc(c.cargo || '')} · CPF ${fmtCPF(c.cpf)}</div>
-      ${c.user_id ? '' : `<div class="card"><div class="card-b">
-        <div style="font-weight:600">Código de primeiro acesso</div>
-        <div class="codigo">${esc(cod || '—')}</div>
-        <div class="muted">Passe o CPF e este código para ${esc(primeiro(c.nome))}. No celular, a pessoa toca em “Primeiro acesso”, digita os dois e cria a própria senha.</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="copiarConvite('${id}','${esc(cod || '')}')">Copiar mensagem para enviar</button>
-      </div></div>`}
-      <div class="sec-t">Folha de ponto</div>
-      ${(() => { const cf = confs.find(x => x.ref === ant); return `<div class="muted" style="margin:-2px 4px 10px">${cf ? `<span style="color:var(--green)">✓ Folha de ${refLabel(ant)} assinada em ${dataHora(cf.confirmado_em)}</span>` : `Folha de ${refLabel(ant)}: ainda sem assinatura do colaborador.`}</div>`; })()}
-      <div class="stack" style="margin-bottom:16px">
-        <button class="btn btn-primary" onclick="editarFolha('${id}','${ant}')">Preencher ${refLabel(ant)}</button>
-        <button class="btn btn-ghost" onclick="editarFolha('${id}','${atual}')">Preencher ${refLabel(atual)}</button>
-        <button class="btn btn-ghost" onclick="verFolhaRH('${id}','${ant}')">Ver folha como o colaborador vê</button>
+    const r = resumoColab(c, ref, regs), T = r.T, cf = confs.find(x => x.ref === ref), hRef = hs.find(h => h.ref === ref);
+    const kpi = (lb, v, cls = '') => `<div><small>${lb}</small><b class="${cls}">${v}</b></div>`;
+    const statusFolha = !regs.length ? `<span class="tag t-neutral">Folha não lançada</span>`
+      : cf ? `<span class="tag t-ok">✓ Assinada em ${dataHora(cf.confirmado_em)}</span>`
+      : ref >= atual ? `<span class="tag t-neutral">Mês em andamento</span>` : `<span class="tag t-warn">Aguardando assinatura</span>`;
+    const statusHol = !hRef ? `<span class="tag t-neutral">Sem holerite</span>`
+      : assDe(hRef.id) ? `<span class="tag t-ok">✓ Holerite assinado</span>` : `<span class="tag t-warn">Holerite sem assinatura</span>`;
+    const jornadaCurta = jornadaTexto(c.jornada);
+    sheet('Colaborador', `
+      <div class="cx-head">
+        <div class="av cx-av">${esc(ini(c.nome))}</div>
+        <div style="min-width:0">
+          <div class="cx-nome">${esc(c.nome)}</div>
+          <div class="muted">${esc(c.cargo || 'Sem cargo')}${c.departamento ? ' · ' + esc(c.departamento) : ''} · CPF ${fmtCPF(c.cpf)}</div>
+          <div class="cx-tags">${c.user_id ? '<span class="tag t-ok">Acesso ativo</span>' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${c.admissao ? `<span class="tag t-neutral">Admissão ${isoBR(c.admissao)}</span>` : ''}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm cx-edit" onclick="editarColab('${id}')">Editar dados</button>
       </div>
-      <div class="sec-t">Holerites</div>
-      <div class="card">${hs.length ? hs.map(h => `<button class="item" onclick="editarHolerite(${h.id})"><div><div class="t">${refLabel(h.ref)}</div><div class="d">Líquido ${BRL(totais(h).l)} · ${assDe(h.id) ? `<span style="color:var(--green)">✓ assinado em ${isoBR(assDe(h.id).assinado_em)}</span>` : 'sem assinatura'}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('') : '<div class="empty">Nenhum holerite.</div>'}</div>
-      <div class="stack" style="margin-bottom:16px">
-        <button class="btn btn-primary" onclick="abrirGerador('${id}','${ant}')">Calcular holerite de ${refLabel(ant)} pela folha</button>
-        <button class="btn btn-ghost" onclick="editarHolerite(null,'${id}')">${sv(IC.plus, 16)} Lançar holerite à mão</button>
+
+      <div class="mes-nav cx-mes">
+        <button class="btn btn-ghost btn-sm" aria-label="Mês anterior" onclick="verColab('${id}','${somaMes(ref, -1)}')">‹</button>
+        <div>${refLabel(ref)}</div>
+        <button class="btn btn-ghost btn-sm" aria-label="Próximo mês" onclick="verColab('${id}','${somaMes(ref, 1)}')" ${ref >= atual ? 'style="visibility:hidden"' : ''}>›</button>
       </div>
-      <div class="sec-t">Cadastro</div>
-      <div class="stack">
-        <button class="btn btn-ghost" onclick="editarColab('${id}')">Editar dados do colaborador</button>
-        ${c.user_id ? `<button class="btn btn-ghost" onclick="confirmarReset('${id}')">Esqueceu a senha? Gerar novo código</button>` : ''}
+
+      <div class="cx-grid">
+        <div class="card cx-card"><div class="card-b">
+          <div class="cx-t"><span>Folha de ponto</span>${statusFolha}</div>
+          ${regs.length ? `<div class="fp-kpi cx-kpi">
+            ${kpi('Trabalhadas', hm(T.trab))}${kpi('Normais', hm(r.normais))}
+            ${kpi('Extras', hmOu(T.extra), 'ex')}${kpi('Atrasos', hmOu(r.atraso), r.atraso ? 'at' : '')}
+            ${kpi('Faltas', r.faltas ? r.faltas + (r.faltas === 1 ? ' dia' : ' dias') : '-', r.faltas ? 'at' : '')}${kpi('Noturno', hmOu(T.not))}
+          </div>
+          ${T.extra ? `<div class="cx-linha"><span>Extras 50% · 100% · 110%</span><b>${hmOu(T.e50)} · ${hmOu(T.e100)} · ${hmOu(T.e110)}</b></div>` : ''}
+          ${r.faltas ? `<div class="cx-linha"><span>Dias das faltas</span><b>${esc(r.datasFalta)}</b></div>` : ''}
+          ${r.ocorr ? `<div class="cx-linha"><span>Ocorrências</span><b>${esc(r.ocorr)}</b></div>` : ''}` : `<div class="muted" style="margin:6px 0 4px">Nenhum dia lançado em ${refLabel(ref)}.</div>`}
+          <div class="cx-acoes">
+            <button class="btn btn-primary btn-sm" onclick="editarFolha('${id}','${ref}')">${regs.length ? 'Editar folha' : 'Preencher folha'}</button>
+            ${regs.length ? `<button class="btn btn-ghost btn-sm" onclick="verFolhaRH('${id}','${ref}')">Ver folha completa</button>` : ''}
+          </div>
+        </div></div>
+
+        <div class="card cx-card"><div class="card-b">
+          <div class="cx-t"><span>Holerite de ${refLabel(ref)}</span>${statusHol}</div>
+          ${hRef ? `<div class="cx-liq"><small>Valor líquido</small><b>${BRL(totais(hRef).l)}</b></div>
+            <div class="cx-acoes"><button class="btn btn-primary btn-sm" onclick="editarHolerite(${hRef.id})">Abrir / editar</button>${assDe(hRef.id) ? `<button class="btn btn-ghost btn-sm" onclick="verHolerite(${hRef.id})">Ver assinado</button>` : ''}</div>`
+          : `<div class="muted" style="margin:6px 0 4px">Ainda não há holerite deste mês.</div>
+            <div class="cx-acoes"><button class="btn btn-primary btn-sm" onclick="abrirGerador('${id}','${ref}')">Calcular pela folha</button><button class="btn btn-ghost btn-sm" onclick="editarHolerite(null,'${id}')">Lançar à mão</button></div>`}
+          ${hs.filter(h => h.ref !== ref).length ? `<div class="cx-sub">Outros meses</div>
+            ${hs.filter(h => h.ref !== ref).slice(0, 6).map(h => `<button class="cx-mini" onclick="editarHolerite(${h.id})"><span>${refLabel(h.ref)}</span><span>${BRL(totais(h).l)} ${assDe(h.id) ? '<i class="ok">✓</i>' : '<i class="pend">•</i>'}</span></button>`).join('')}` : ''}
+        </div></div>
+
+        <div class="card cx-card"><div class="card-b">
+          <div class="cx-t"><span>Dados</span></div>
+          ${kv('Salário base', BRL(c.salario))}${+c.ajuda_custo ? kv('Ajuda de custo', BRL(c.ajuda_custo)) : ''}
+          ${kv('Jornada', jornadaCurta)}${kv('Centro de custo', c.centro_custo)}${kv('Código', c.codigo)}
+          ${kv('Telefone', c.tel)}${kv('E-mail', c.email)}
+        </div></div>
+
+        <div class="card cx-card"><div class="card-b">
+          <div class="cx-t"><span>Acesso ao portal</span></div>
+          ${c.user_id ? `<div class="muted">${esc(primeiro(c.nome))} já criou a senha e entra com o CPF.</div>
+            <div class="cx-acoes"><button class="btn btn-ghost btn-sm" onclick="confirmarReset('${id}')">Esqueceu a senha? Gerar novo código</button></div>`
+          : `<div class="muted">Código de primeiro acesso:</div><div class="codigo">${esc(cod || '—')}</div>
+            <div class="muted" style="font-size:13px">No celular, a pessoa toca em “Primeiro acesso”, digita o CPF e este código e cria a senha.</div>
+            <div class="cx-acoes"><button class="btn btn-primary btn-sm" onclick="copiarConvite('${id}','${esc(cod || '')}')">Copiar mensagem para o WhatsApp</button></div>`}
+        </div></div>
       </div>`,
       [['Fechar', 'ghost', 'fecharSheet()']]);
+    document.querySelector('.sheet')?.classList.add('sheet-larga');
   } catch (e) { fecharSheet(); toast(erroMsg(e)); }
 }
 function copiarConvite(id, cod) {
