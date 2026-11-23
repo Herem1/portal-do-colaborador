@@ -678,7 +678,7 @@ async function vEquipe() {
   const com = new Set(pts.map(p => p.colaborador_id)), ok = new Set(confs.map(c => c.colaborador_id));
   statusOk = Object.fromEntries(l.map(c => [c.id, !com.has(c.id) ? '' : ok.has(c.id) ? 'ok' : 'pend']));
   return `
-  <button class="btn btn-ghost" style="margin-bottom:10px" onclick="abrirImportacao()">Importar planilha (Excel)</button>
+  <div class="row2" style="margin-bottom:10px"><button class="btn btn-ghost" onclick="abrirImportacao()">Importar planilha (Excel)</button><button class="btn btn-ghost" onclick="abrirResumo()">Resumo de horas (Excel)</button></div>
   <input class="srch" type="search" placeholder="Buscar por nome, CPF ou cargo" aria-label="Buscar colaborador" value="${esc(busca)}" oninput="busca=this.value;$('lista').innerHTML=listaEquipe()">
   <div class="sec-t">${l.length} colaborador${l.length === 1 ? '' : 'es'}</div>
   <div class="card" id="lista">${listaEquipe()}</div>
@@ -1267,6 +1267,55 @@ async function baixarModelo() {
     X.writeFile(wb, 'modelo-portal-do-colaborador.xlsx');
     toast('Planilha modelo baixada.');
   } catch (e) { toast('Este navegador bloqueou o download. ' + (e.message || '')); }
+}
+/* ---- Resumo de horas do mês, um colaborador por linha (Excel) ---- */
+function abrirResumo() {
+  sheet('Resumo de horas', `<p class="muted" style="margin-top:0">Baixa uma planilha com uma linha por colaborador: horas normais, extras 50%, 100% e 110%, atrasos, faltas e adicional noturno do mês.</p>
+    <div class="field"><label for="rRef">Mês</label><input id="rRef" type="month" value="${mesAnterior()}"></div>`,
+    [['Fechar', 'ghost', 'fecharSheet()'], ['Baixar Excel', 'primary', 'baixarResumo(this)']]);
+}
+async function pontosDoMes(ref) {
+  const out = [];
+  for (let i = 0; ; i += 1000) {
+    const l = await q(sb.from('pontos').select('colaborador_id,dia,marcacoes,ocorrencia,observacao').gte('dia', ref + '-01').lte('dia', fimDoMes(ref)).order('id').range(i, i + 999));
+    out.push(...l); if (l.length < 1000) return out;
+  }
+}
+function resumoColab(c, ref, regs) {
+  const {dias, T} = calcularFolha(c, ref, regs);
+  const faltas = dias.filter(x => !x.futuro && x.prev && !x.trab && !x.m.length);
+  const minFalta = faltas.reduce((a, x) => a + x.atraso, 0), conta = oc => dias.filter(x => x.oc === oc).length;
+  return {T, trabalhados: dias.filter(x => x.trab).length, faltas: faltas.length, minFalta, atraso: T.atraso - minFalta,
+    normais: T.trab - T.extra, ocorr: ['Atestado', 'Férias', 'Folga', 'Feriado', 'Sem expediente'].map(o => [o, conta(o)]).filter(([, n]) => n).map(([o, n]) => `${o}: ${n}`).join(' · ')};
+}
+async function baixarResumo(btn) {
+  const ref = $('rRef').value; if (!ref) return toast('Escolha o mês.');
+  await comBotao(btn, async () => {
+    try {
+      const [X, equipe, regs, confs] = await Promise.all([carregarXLSX(), carregarEquipe(), pontosDoMes(ref), q(sb.from('confirmacoes').select('colaborador_id,confirmado_em').eq('ref', ref))]);
+      const porColab = {}; regs.forEach(r => (porColab[r.colaborador_id] = porColab[r.colaborador_id] || []).push(r));
+      const assin = Object.fromEntries(confs.map(c => [c.colaborador_id, c.confirmado_em]));
+      const H = m => ({t: 'n', v: (m || 0) / 1440, z: '[h]:mm'});
+      const cab = ['Colaborador', 'CPF', 'Cargo', 'Centro de custo', 'Dias trabalhados', 'Horas previstas', 'Horas trabalhadas', 'Horas normais',
+        'Extras 50%', 'Extras 100%', 'Extras 110%', 'Total de extras', 'Atrasos', 'Faltas (dias)', 'Horas de falta',
+        'Noturno 20%', 'Noturno 100%', 'Noturno 110%', 'Total noturno', 'Outras ocorrências', 'Folha assinada'];
+      const linhas = equipe.filter(c => porColab[c.id]).map(c => {
+        const r = resumoColab(c, ref, porColab[c.id]), T = r.T;
+        return [c.nome, fmtCPF(c.cpf), c.cargo || '', c.centro_custo || '', r.trabalhados, H(T.prev), H(T.trab), H(r.normais),
+          H(T.e50), H(T.e100), H(T.e110), H(T.extra), H(r.atraso), r.faltas, H(r.minFalta),
+          H(T.n20), H(T.n100), H(T.n110), H(T.not), r.ocorr, assin[c.id] ? 'Sim · ' + dataHora(assin[c.id]) : 'Não'];
+      });
+      if (!linhas.length) return toast(`Nenhuma folha lançada em ${refLabel(ref)}.`);
+      const soma = k => linhas.reduce((a, l) => a + (typeof l[k] === 'object' ? l[k].v * 1440 : +l[k] || 0), 0);
+      const total = cab.map((_, k) => k === 0 ? 'TOTAL' : k < 4 || k > 18 ? '' : k === 4 || k === 13 ? soma(k) : H(soma(k)));
+      const ws = X.utils.aoa_to_sheet([[`Resumo de horas · ${refLabel(ref)} · ${empresa.nome}`], [], cab, ...linhas, total]);
+      ws['!cols'] = cab.map((h, i) => ({wch: i === 0 ? 32 : i === 19 ? 28 : i === 20 ? 26 : Math.max(11, h.length + 2)}));
+      ws['!merges'] = [{s: {r: 0, c: 0}, e: {r: 0, c: 8}}];
+      const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Resumo');
+      X.writeFile(wb, `resumo-horas-${ref}.xlsx`);
+      toast(`Resumo de ${refLabel(ref)} baixado (${linhas.length} colaborador${linhas.length === 1 ? '' : 'es'}).`);
+    } catch (e) { toast(erroMsg(e)); }
+  });
 }
 function abrirImportacao() {
   sheet('Importar planilha', `

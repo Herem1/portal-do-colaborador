@@ -71,10 +71,10 @@
   const podeGravar = () => isAdmin();
 
   function builder(t) {
-    let filters = [], ord = null, lim = null, op = 'select', payload = null, single = false, maybe = false, conflict = null;
+    let filters = [], ord = null, lim = null, rng = null, op = 'select', payload = null, single = false, maybe = false, conflict = null;
     const b = {
       select() { return b; }, eq(k, v) { filters.push(r => r[k] == v); return b; }, gte(k, v) { filters.push(r => r[k] >= v); return b; }, lte(k, v) { filters.push(r => r[k] <= v); return b; },
-      order(k, o) { ord = [k, o && o.ascending === false ? -1 : 1]; return b; }, limit(n) { lim = n; return b; },
+      order(k, o) { ord = [k, o && o.ascending === false ? -1 : 1]; return b; }, limit(n) { lim = n; return b; }, range(a, z) { rng = [a, z]; return b; },
       single() { single = true; return b; }, maybeSingle() { maybe = true; return b; },
       insert(p) { op = 'insert'; payload = p; return b; }, update(p) { op = 'update'; payload = p; return b; },
       upsert(p, o) { op = 'upsert'; payload = p; conflict = o.onConflict.split(','); return b; },
@@ -109,6 +109,7 @@
       r = r.filter(x => podeVer(t, x)).map(x => { const o = JSON.parse(JSON.stringify(x)); OCULTOS.forEach(k => delete o[k]); return o; });
       if (ord) r.sort((a, b) => (a[ord[0]] > b[ord[0]] ? 1 : a[ord[0]] < b[ord[0]] ? -1 : 0) * ord[1]);
       if (lim) r = r.slice(0, lim);
+      if (rng) r = r.slice(rng[0], rng[1] + 1);
       if (single) { if (!r[0]) throw new Error('Registro não encontrado'); return {data: r[0], error: null}; }
       if (maybe) return {data: r[0] || null, error: null};
       return {data: r, error: null};
