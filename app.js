@@ -820,7 +820,8 @@ async function verColab(id, refSel) {
             <div class="cx-acoes"><button class="btn btn-ghost btn-sm" onclick="confirmarReset('${id}')">Esqueceu a senha? Gerar novo código</button></div>`
           : `<div class="muted">Código de primeiro acesso:</div><div class="codigo">${esc(cod || '—')}</div>
             <div class="muted" style="font-size:13px">No celular, a pessoa toca em “Primeiro acesso”, digita o CPF e este código e cria a senha.</div>
-            <div class="cx-acoes"><button class="btn btn-primary btn-sm" onclick="copiarConvite('${id}','${esc(cod || '')}')">Copiar mensagem para o WhatsApp</button></div>`}
+            <div class="cx-acoes"><button class="btn btn-primary btn-sm" onclick="copiarConvite('${id}','${esc(cod || '')}')">Copiar mensagem para o WhatsApp</button><button class="btn btn-ghost btn-sm" onclick="confirmarReset('${id}')">Gerar novo código</button></div>
+            <div class="muted" style="font-size:13px;margin-top:6px">Se a pessoa errou o código muitas vezes e apareceu “Muitas tentativas erradas”, gere um novo código e mande de novo.</div>`}
         </div></div>
       </div>`,
       [['Fechar', 'ghost', 'fecharSheet()']]);
@@ -835,7 +836,10 @@ function copiarConvite(id, cod) {
 }
 function confirmarReset(id) {
   const c = cacheEquipe.find(x => x.id === id);
-  sheet('Gerar novo código', `<p>A senha atual de <b>${esc(c.nome)}</b> deixa de funcionar e será gerado um novo código de primeiro acesso para a pessoa criar outra senha.</p>`,
+  const txt = c.user_id
+    ? `A senha atual de <b>${esc(c.nome)}</b> deixa de funcionar e será gerado um novo código de primeiro acesso para a pessoa criar outra senha.`
+    : `O código atual de <b>${esc(c.nome)}</b> deixa de funcionar e será gerado um novo. Se a pessoa estava bloqueada por errar muitas vezes, ela volta a poder entrar com o código novo.`;
+  sheet('Gerar novo código', `<p>${txt}</p>`,
     [['Voltar', 'ghost', `verColab('${id}')`], ['Gerar código', 'primary', `resetarAcesso('${id}',this)`]]);
 }
 async function resetarAcesso(id, btn) {
