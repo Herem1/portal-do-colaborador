@@ -68,7 +68,7 @@ O RH abre o colaborador, toca em **Calcular holerite de <mês> pela folha**, con
 - **DSR sobre extras**: extras ÷ dias úteis × (domingos + feriados do mês).
 - **Atrasos e faltas**: horas × valor da hora (o desconto do DSR por falta não é automático; ajuste à mão se precisar).
 - **INSS** progressivo, **IRRF** (com dependentes, desconto simplificado quando for melhor e a redução de 2026 para quem ganha até R$ 7.350) e **FGTS** de 8% no rodapé.
-- **Ajuda de custo** entra como vencimento sem INSS/IRRF. **Adiantamento** é informado na hora de calcular.
+- **Adiantamento** é informado na hora de calcular.
 
 Tabelas de 2026 no `app.js` (constante `PARAM`). Quando o governo mudar as tabelas, é só atualizar ali. Confira sempre o holerite com a sua contabilidade antes de liberar.
 

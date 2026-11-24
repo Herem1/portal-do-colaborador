@@ -82,7 +82,7 @@ function imprimir() { try { window.print(); } catch (e) { toast('Não foi possí
 /* ---------- Supabase ---------- */
 const configurado = CFG.SUPABASE_URL && /^https:\/\//.test(CFG.SUPABASE_URL) && CFG.SUPABASE_ANON_KEY && !/COLE_AQUI/.test(CFG.SUPABASE_ANON_KEY);
 const sb = configurado ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {auth:{persistSession:true, autoRefreshToken:true}}) : null;
-const COLS = 'id,user_id,nome,cpf,codigo,cargo,cbo,departamento,filial,centro_custo,lotacao,tipo_salario,admissao,email,tel,salario,ajuda_custo,dependentes,banco,jornada,obra,horario,ponto_auto,situacao,demissao';
+const COLS = 'id,user_id,nome,cpf,codigo,cargo,cbo,departamento,filial,centro_custo,lotacao,tipo_salario,admissao,email,tel,salario,dependentes,banco,jornada,obra,horario,ponto_auto,situacao,demissao';
 async function q(promise) { const {data, error} = await promise; if (error) throw error; return data; }
 
 /* ---------- estado ---------- */
@@ -671,7 +671,7 @@ async function vPerfil() {
     ${kv('Jornada', jornadaTexto(c.jornada))}
   </div></div>
   <div class="card"><div class="card-h"><h3>Pagamento</h3></div><div class="card-b">
-    ${kv('Salário base', BRL(c.salario))}${+c.ajuda_custo ? kv('Ajuda de custo', BRL(c.ajuda_custo)) : ''}${kv('Conta', c.banco)}
+    ${kv('Salário base', BRL(c.salario))}${kv('Conta', c.banco)}
   </div></div>
   <p class="muted" style="padding:0 4px 12px">Algum dado errado? Peça a correção ao RH.</p>
   <div class="stack">
@@ -809,7 +809,7 @@ async function verColab(id, refSel) {
 
         <div class="card cx-card"><div class="card-b">
           <div class="cx-t"><span>Dados</span></div>
-          ${kv('Salário base', BRL(c.salario))}${+c.ajuda_custo ? kv('Ajuda de custo', BRL(c.ajuda_custo)) : ''}
+          ${kv('Salário base', BRL(c.salario))}
           ${kv('Horário', horarioTexto(c))}${kv('Centro de custo', c.centro_custo)}${kv('Código', c.codigo)}
           ${kv('Telefone', c.tel)}${kv('E-mail', c.email)}
         </div></div>
@@ -847,7 +847,7 @@ async function resetarAcesso(id, btn) {
 
 /* ---- cadastro do colaborador ---- */
 function editarColab(id) {
-  const c = id ? cacheEquipe.find(x => x.id === id) : {nome:'', cpf:'', codigo:'', cargo:'', cbo:'', departamento:'', filial:'', centro_custo:'', lotacao:'', tipo_salario:'Mensalista', admissao: agoraBR().iso, email:'', tel:'', salario:'', ajuda_custo:'', dependentes:0, banco:'', jornada:['', '09:00', '09:00', '09:00', '09:00', '08:00', '']};
+  const c = id ? cacheEquipe.find(x => x.id === id) : {nome:'', cpf:'', codigo:'', cargo:'', cbo:'', departamento:'', filial:'', centro_custo:'', lotacao:'', tipo_salario:'Mensalista', admissao: agoraBR().iso, email:'', tel:'', salario:'', dependentes:0, banco:'', jornada:['', '09:00', '09:00', '09:00', '09:00', '08:00', '']};
   const f = (k, lb, tipo = 'text', extra = '') => `<div class="field"><label for="f_${k}">${lb}</label><input id="f_${k}" type="${tipo}" value="${esc(k === 'cpf' ? fmtCPF(c[k]) : (c[k] ?? ''))}" ${extra}></div>`;
   const jor = c.jornada && c.jornada.length === 7 ? c.jornada : ['', '', '', '', '', '', ''];
   sheet(id ? 'Editar colaborador' : 'Novo colaborador', `
@@ -866,7 +866,7 @@ function editarColab(id) {
       </tbody></table>
       <button type="button" class="linkbtn" style="font-size:13px" onclick="copiarSegunda()">Copiar o horário de segunda para terça a quinta</button>
       <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:10px"><input type="checkbox" id="f_ponto_auto" ${pontoAuto(c) ? 'checked' : ''} style="width:20px;height:20px;flex:none"> <span><b>Ponto automático</b>: todo dia de trabalho já entra com este horário. O RH só lança faltas e mudanças.</span></label></div>
-    <div class="row2">${f('salario', 'Salário base (R$)', 'number', 'step="0.01" min="0" inputmode="decimal"')}${f('ajuda_custo', 'Ajuda de custo (R$)', 'number', 'step="0.01" min="0" inputmode="decimal"')}</div>
+    ${f('salario', 'Salário base (R$)', 'number', 'step="0.01" min="0" inputmode="decimal"')}
     <div class="row2">${f('dependentes', 'Dependentes (IRRF)', 'number', 'step="1" min="0" inputmode="numeric"')}<div></div></div>
     <div class="row2">${f('email', 'E-mail', 'email')}${f('tel', 'Telefone', 'tel')}</div>
     ${f('banco', 'Banco / conta')}
@@ -896,7 +896,7 @@ async function salvarColab(id, btn) {
   if (situacao === 'Desligado' && !demissao) return erro('Informe a data do desligamento.');
   const o = k => v(k) || null;
   const dados = {nome: v('nome'), codigo: o('codigo'), cargo: o('cargo'), cbo: o('cbo'), departamento: o('departamento'), filial: o('filial'), centro_custo: o('centro_custo'), lotacao: o('lotacao'), obra: o('obra'),
-    tipo_salario: v('tipo_salario'), admissao: o('admissao'), jornada, horario, ponto_auto: $('f_ponto_auto').checked, situacao, demissao, email: o('email'), tel: o('tel'), salario: +v('salario') || 0, ajuda_custo: +v('ajuda_custo') || 0, dependentes: Math.max(0, Math.round(+v('dependentes') || 0)), banco: o('banco')};
+    tipo_salario: v('tipo_salario'), admissao: o('admissao'), jornada, horario, ponto_auto: $('f_ponto_auto').checked, situacao, demissao, email: o('email'), tel: o('tel'), salario: +v('salario') || 0, dependentes: Math.max(0, Math.round(+v('dependentes') || 0)), banco: o('banco')};
   await comBotao(btn, async () => {
     try {
       let novoId = id;
@@ -1103,7 +1103,6 @@ function gerarHolerite(colab, ref, registros, op = {}) {
   const atr = h(T.atraso) * vh;
   P('910', 'ATRASOS / FALTAS', dec(h(T.atraso)), atr, 'd');
   const tributavel = r2(it.filter(i => i.tipo === 'p').reduce((a, i) => a + i.valor, 0) - r2(atr));
-  if (+colab.ajuda_custo) P('300', 'AJUDA DE CUSTO', '', +colab.ajuda_custo);
   const baseINSS = Math.max(0, tributavel), contrib = Math.min(baseINSS, PARAM.inss.at(-1)[0]), inss = calcINSS(baseINSS);
   P('998', 'I.N.S.S.', dec(contrib ? inss / contrib * 100 : 0), inss, 'd');
   const ir = calcIRRF(baseINSS, inss, dep);
@@ -1339,7 +1338,7 @@ function carregarXLSX() {
   });
 }
 const ABAS = {
-  colab: ['CPF', 'Nome', 'Código', 'Cargo', 'Obra', 'CBO', 'Departamento', 'Filial', 'Centro de custo', 'CC holerite', 'Tipo', 'Admissão', 'Salário', 'Ajuda de custo', 'Dependentes', 'E-mail', 'Telefone', 'Banco', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom', 'Situação', 'Desligamento'],
+  colab: ['CPF', 'Nome', 'Código', 'Cargo', 'Obra', 'CBO', 'Departamento', 'Filial', 'Centro de custo', 'CC holerite', 'Tipo', 'Admissão', 'Salário', 'Dependentes', 'E-mail', 'Telefone', 'Banco', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom', 'Situação', 'Desligamento'],
   ponto: ['CPF', 'Data', 'Entrada', 'Saída almoço', 'Retorno almoço', 'Saída', 'Ocorrência', 'Observação'],
   hol: ['CPF', 'Mês', 'Código', 'Descrição', 'Referência', 'Vencimento', 'Desconto'],
   bases: ['CPF', 'Mês', 'Salário base', 'Sal. contr. INSS', 'Base cálc. FGTS', 'FGTS do mês', 'Base cálc. IRRF', 'Faixa IRRF']
@@ -1361,8 +1360,8 @@ function modeloPlanilha() {
       ['', 'Importar de novo o mesmo CPF e mês substitui o holerite inteiro.'],
       ['Bases holerite', 'Opcional: rodapé do holerite (uma linha por CPF e mês).']],
     Colaboradores: [ABAS.colab,
-      ['111.111.111-11', 'Maria da Silva Exemplo', '30', 'Pedreira', 'Obra Centro', '715210', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '08/06/2025', '2800,00', '0', '1', 'maria@exemplo.com', '(00) 90000-0000', 'Banco 001 Ag 0001 CC 12345-6', '09:00', '09:00', '09:00', '09:00', '08:00', '', '', 'Ativo', ''],
-      ['222.222.222-22', 'João Pereira Exemplo', '31', 'Servente', 'Obra Centro', '717020', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '01/02/2026', '1900,00', '150,00', '0', '', '', '', '09:00', '09:00', '09:00', '09:00', '08:00', '', '', 'Ativo', '']],
+      ['111.111.111-11', 'Maria da Silva Exemplo', '30', 'Pedreira', 'Obra Centro', '715210', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '08/06/2025', '2800,00', '1', 'maria@exemplo.com', '(00) 90000-0000', 'Banco 001 Ag 0001 CC 12345-6', '09:00', '09:00', '09:00', '09:00', '08:00', '', '', 'Ativo', ''],
+      ['222.222.222-22', 'João Pereira Exemplo', '31', 'Servente', 'Obra Centro', '717020', '2', '1', 'CT0001', 'Operacional', 'Mensalista', '01/02/2026', '1900,00', '0', '', '', '', '09:00', '09:00', '09:00', '09:00', '08:00', '', '', 'Ativo', '']],
     Ponto: [ABAS.ponto,
       ['111.111.111-11', d(1), '06:58', '11:40', '12:42', '16:58', '', ''],
       ['111.111.111-11', d(2), '07:00', '11:40', '12:40', '19:01', '', 'Efetivo até 19h'],
@@ -1507,13 +1506,13 @@ async function lerPlanilha(arq) {
     for (const {n, v} of linhasDaAba(X, wb, 'colab')) {
       const cpf = lerCPF(v.CPF); if (cpf.length !== 11) { E('Colaboradores', n, 'CPF inválido'); continue; }
       const adm = lerData(v['Admissão']); if (adm === null) { E('Colaboradores', n, 'data de admissão inválida (use dd/mm/aaaa)'); continue; }
-      const sal = lerValor(v['Salário']), aj = lerValor(v['Ajuda de custo']);
-      if (Number.isNaN(sal) || Number.isNaN(aj)) { E('Colaboradores', n, 'valor em reais inválido'); continue; }
+      const sal = lerValor(v['Salário']);
+      if (Number.isNaN(sal)) { E('Colaboradores', n, 'valor em reais inválido'); continue; }
       const jor = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => lerHora(v[d]));
       if (jor.some(x => x === null)) { E('Colaboradores', n, 'jornada inválida (use 09:00)'); continue; }
       const temJornada = jor.some(Boolean);
       const d = {nome: v.Nome, codigo: String(v['Código']), cargo: v.Cargo, obra: v.Obra ? String(v.Obra).trim() : '', cbo: String(v.CBO), departamento: String(v.Departamento), filial: String(v.Filial),
-        centro_custo: v['Centro de custo'], lotacao: v['CC holerite'], tipo_salario: v.Tipo, admissao: adm, salario: sal, ajuda_custo: aj, dependentes: v.Dependentes === '' || v.Dependentes == null ? '' : Math.max(0, Math.round(+String(v.Dependentes).replace(',', '.') || 0)), email: v['E-mail'], tel: String(v.Telefone), banco: v.Banco};
+        centro_custo: v['Centro de custo'], lotacao: v['CC holerite'], tipo_salario: v.Tipo, admissao: adm, salario: sal, dependentes: v.Dependentes === '' || v.Dependentes == null ? '' : Math.max(0, Math.round(+String(v.Dependentes).replace(',', '.') || 0)), email: v['E-mail'], tel: String(v.Telefone), banco: v.Banco};
       Object.keys(d).forEach(k => { if (d[k] === '' || d[k] == null) delete d[k]; });
       if (temJornada) { d.jornada = jor; d.horario = null; }
       const sit = semAcento(v['Situação'] || ''), dem = lerData(v.Desligamento);
