@@ -15,7 +15,9 @@ const fmtCPF = v => { v = soDig(v).slice(0, 11); return v.replace(/(\d{3})(\d)/,
 const DIAS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const ROT = ['Entrada','Saída almoço','Retorno almoço','Saída'];
-const OCORRENCIAS = ['', 'Feriado', 'Sem expediente', 'Folga', 'Atestado', 'Férias', 'Falta'];
+const OCORRENCIAS = ['', 'Feriado', 'Sem expediente', 'Folga', 'Atestado', 'Abonado', 'Férias', 'Falta'];
+// Atestado e Abonado: as horas que faltaram (dia inteiro ou parte) são abonadas e não contam como atraso/falta
+const ABONA_HORAS = ['Atestado', 'Abonado'];
 const ini = n => String(n || '?').trim().split(/\s+/).filter(Boolean).map((p, i, a) => i === 0 || i === a.length - 1 ? p[0] : '').join('').toUpperCase().slice(0, 2);
 const primeiro = n => String(n || '').trim().split(/\s+/)[0];
 const toMin = t => { if (!t) return 0; const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -333,7 +335,7 @@ function calcularFolha(colab, ref, registros) {
   const [y] = ref.split('-').map(Number), fer = feriadosDoAno(y), hoje = agoraBR().iso;
   const porDia = Object.fromEntries((registros || []).map(r => [String(r.dia).slice(0, 10), r]));
   const jor = colab.jornada && colab.jornada.length === 7 ? colab.jornada : ['', '09:00', '09:00', '09:00', '09:00', '08:00', ''];
-  const dias = [], T = {trab:0, prev:0, extra:0, atraso:0, e50:0, e100:0, e110:0, not:0, n20:0, n100:0, n110:0};
+  const dias = [], T = {trab:0, prev:0, extra:0, atraso:0, abono:0, e50:0, e100:0, e110:0, not:0, n20:0, n100:0, n110:0};
   for (let d = 1; d <= diasNoMes(ref); d++) {
     const iso = `${ref}-${String(d).padStart(2, '0')}`, dw = dataObj(iso).getDay(), r = porDia[iso] || {};
     const fora = !noContrato(colab, iso), lancado = !!porDia[iso];
@@ -341,21 +343,22 @@ function calcularFolha(colab, ref, registros) {
     if (!lancado && !fora && pontoAuto(colab) && iso <= hoje && iso >= INICIO_PORTAL + '-01' && !fer[iso] && toMin(jor[dw])) { m = horarioDia(colab, dw); auto = m.length > 0; }
     const oc = r.ocorrencia || '', feriado = fer[iso] || (oc === 'Feriado' ? 'Feriado' : '');
     const futuro = iso >= hoje && !m.length;
-    const abona = feriado || ['Sem expediente', 'Folga', 'Atestado', 'Férias'].includes(oc);
+    const abona = feriado || ['Sem expediente', 'Folga', 'Férias'].includes(oc), abonaHoras = !abona && ABONA_HORAS.includes(oc);
     const prev = futuro || abona || fora ? 0 : toMin(jor[dw]);
     const trab = trabalhado(m), not = noturno(m);
-    let extra = 0, atraso = 0;
-    if (!futuro) {
+    let extra = 0, atraso = 0, abono = 0;
+    if (!futuro || (abonaHoras && iso <= hoje)) {
       const dif = trab - prev;
       if (prev === 0) extra = trab;
       else if (dif > TOLERANCIA) extra = dif;
       else if (-dif > TOLERANCIA) atraso = -dif;
     }
+    if (abonaHoras && atraso) { abono = atraso; atraso = 0; }
     const faixa = feriado || dw === 0 ? 110 : dw === 6 ? 100 : 50;
     if (extra) T['e' + faixa] += extra;
     if (not) T['n' + (faixa === 50 ? 20 : faixa)] += not;
-    T.trab += trab; T.not += not; T.prev += prev; T.extra += extra; T.atraso += atraso;
-    dias.push({iso, d, dw, m, not, auto, fora, oc: oc || (fer[iso] ? '' : ''), feriado, obs: r.observacao || '', trab, prev, extra, atraso, futuro,
+    T.trab += trab; T.not += not; T.prev += prev; T.extra += extra; T.atraso += atraso; T.abono += abono;
+    dias.push({iso, d, dw, m, not, auto, fora, oc: oc || (fer[iso] ? '' : ''), feriado, obs: r.observacao || '', trab, prev, extra, atraso, abono, futuro,
       cinza: dw === 0 || dw === 6 || !!feriado});
   }
   return {dias, T};
@@ -393,7 +396,7 @@ function folhaHTML(colab, ref, registros, conf) {
     return `<tr class="${x.cinza ? 'cinza' : ''}"><td>${dt}</td><td>${DIAS[x.dw]}</td>
       <td class="hr">${t(0)}</td><td class="hr">${t(1)}</td><td class="hr">${t(2)}</td><td class="hr">${t(3)}</td>
       <td>${x.futuro ? '' : hmOu(x.trab)}</td><td>${x.futuro ? '' : hmOu(x.prev)}</td>
-      <td class="ex">${x.futuro ? '' : hmOu(x.extra)}</td><td class="at">${x.futuro ? '' : hmOu(x.atraso)}</td>${T.not ? `<td>${hmOu(x.not)}</td>` : ''}
+      <td class="ex">${x.futuro ? '' : hmOu(x.extra)}</td><td class="at">${x.abono ? `<span class="ab">abon. ${hm(x.abono)}</span>` : x.futuro ? '' : hmOu(x.atraso)}</td>${T.not ? `<td>${hmOu(x.not)}</td>` : ''}
       <td class="ob">${esc(oc)}</td><td class="ob">${esc(obs)}</td></tr>`;
   }).join('');
   const tabela = `<div class="fp-tabela ${modoFolha === 'tabela' ? '' : 'hide-tela'}">
@@ -412,7 +415,7 @@ function folhaHTML(colab, ref, registros, conf) {
     else if (x.futuro) meio = `<div class="dl-vazio">—</div>`;
     else meio = `<div class="dl-vazio">${esc(oc || (fds ? 'Descanso' : (x.prev ? 'Sem marcação' : 'Sem expediente')))}</div>`;
     const sub = [x.m.length && oc ? esc(oc) : '', esc(x.obs), x.auto ? '<span class="autot">horário padrão</span>' : '', x.fora && !x.m.length ? 'fora do período de contrato' : ''].filter(Boolean).join(' · ');
-    const dir = x.futuro || (!x.trab && !x.atraso) ? '' : `<div class="dl-r"><b>${hmOu(x.trab)}</b>${x.not ? `<span class="nt">🌙 ${hm(x.not)}</span>` : ''}${x.extra ? `<span class="ex">+${hm(x.extra)}</span>` : x.atraso ? `<span class="at">−${hm(x.atraso)}</span>` : `<span class="ok">✓</span>`}</div>`;
+    const dir = (x.futuro && !x.abono) || (!x.trab && !x.atraso && !x.abono) ? '' : `<div class="dl-r"><b>${hmOu(x.trab)}</b>${x.not ? `<span class="nt">🌙 ${hm(x.not)}</span>` : ''}${x.extra ? `<span class="ex">+${hm(x.extra)}</span>` : x.atraso ? `<span class="at">−${hm(x.atraso)}</span>` : x.abono ? `<span class="ab">abonado ${hm(x.abono)}</span>` : `<span class="ok">✓</span>`}</div>`;
     return `<div class="dl ${x.cinza ? 'cinza' : ''} ${!x.m.length ? 'vazio' : ''}">
       <div class="dl-d"><b>${String(x.d).padStart(2, '0')}</b><small>${DIAS[x.dw]}</small></div>
       <div class="dl-m">${meio}${sub ? `<div class="dl-o">${sub}</div>` : ''}</div>${dir}</div>`;
@@ -440,6 +443,7 @@ function folhaHTML(colab, ref, registros, conf) {
         <tr><td>Extras 110% (domingo e feriado)</td><td class="n">${hmOu(T.e110)}</td><td class="g">110%</td></tr>
         ${[[20, 'segunda a sexta'], [100, 'sábado'], [110, 'domingo e feriado']].filter(([k]) => T['n' + k]).map(([k, lb]) => `<tr><td>Adicional noturno ${k}% (${lb} · 22h às 5h)</td><td class="n">${hm(T['n' + k])}</td><td class="g">${k}%</td></tr>`).join('')}
         <tr><td>Atrasos / faltas</td><td class="n">${hmOu(T.atraso)}</td><td></td></tr>
+        ${T.abono ? `<tr><td>Horas abonadas (atestado / abono)</td><td class="n">${hm(T.abono)}</td><td></td></tr>` : ''}
         <tr class="tot"><td>Saldo (extras – atrasos)</td><td class="n">${hm(saldo)}</td><td></td></tr>
       </tbody></table>
     </div>
@@ -785,6 +789,7 @@ async function verColab(id, refSel) {
           </div>
           ${T.extra ? `<div class="cx-linha"><span>Extras 50% · 100% · 110%</span><b>${hmOu(T.e50)} · ${hmOu(T.e100)} · ${hmOu(T.e110)}</b></div>` : ''}
           ${r.faltas ? `<div class="cx-linha"><span>Dias das faltas</span><b>${esc(r.datasFalta)}</b></div>` : ''}
+          ${T.abono ? `<div class="cx-linha"><span>Horas abonadas · ${hm(T.abono)}</span><b>${esc(r.abonados)}</b></div>` : ''}
           ${r.ocorr ? `<div class="cx-linha"><span>Ocorrências</span><b>${esc(r.ocorr)}</b></div>` : ''}` : `<div class="muted" style="margin:6px 0 4px">Nenhum dia lançado em ${refLabel(ref)}.</div>`}
           <div class="cx-acoes">
             <button class="btn btn-primary btn-sm" onclick="editarFolha('${id}','${ref}')">${tem ? 'Lançar faltas / ajustes' : 'Preencher folha'}</button>
@@ -932,7 +937,7 @@ async function editarFolha(id, ref) {
       <div class="t4">${ROT.map((r, i) => `<input id="pd${i}" inputmode="numeric" placeholder="${['07:00', '12:00', '13:00', '17:00'][i]}" aria-label="${r} padrão">`).join('')}</div>
       <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="preencherPadrao()">Copiar para os dias de trabalho vazios</button>
     </div></div>
-    ${pontoAuto(c) ? `<div class="aviso-auto">⏱ <b>Ponto automático ligado.</b> Dias em branco contam como trabalhados no horário padrão (o cinza claro). Lance só o que mudou: horário diferente, ou escolha <b>Falta</b>, Atestado, Folga etc. em Ocorrência.</div>` : ''}
+    ${pontoAuto(c) ? `<div class="aviso-auto">⏱ <b>Ponto automático ligado.</b> Dias em branco contam como trabalhados no horário padrão (o cinza claro). Lance só o que mudou: horário diferente, ou escolha <b>Falta</b>, Atestado, Folga etc. em Ocorrência. Para <b>abonar</b> uma falta ou horas a menos, escolha <b>Abonado</b> (ou Atestado) e escreva o motivo em Observação.</div>` : ''}
     <div class="muted" style="font-size:12.5px;margin:2px 2px 8px">Digite só números (0700 vira 07:00). Turno que passa da meia-noite pode: ex. entrada 22:00 e saída 06:00. Também dá para copiar as horas de uma planilha do Excel e colar na primeira célula.</div>
     <div class="ed-scroll"><table class="ed"><thead><tr><th>Dia</th><th>Entrada</th><th>Saída</th><th>Entrada</th><th>Saída</th><th>Ocorrência</th><th>Observação</th></tr></thead><tbody>`;
   for (let d = 1; d <= diasNoMes(ref); d++) {
@@ -1350,7 +1355,7 @@ function modeloPlanilha() {
       ['Colaboradores', 'Um colaborador por linha. O CPF identifica a pessoa: se já existir, os dados são atualizados (células vazias não apagam nada).'],
       ['', 'Seg a Dom = jornada prevista do dia (ex.: 09:00). Deixe vazio nos dias sem expediente.'],
       ['Ponto', 'Um dia por linha. Data no formato dd/mm/aaaa e horários no formato 07:00.'],
-      ['', 'Ocorrência (opcional): Feriado, Sem expediente, Folga, Atestado, Férias ou Falta.'],
+      ['', 'Ocorrência (opcional): Feriado, Sem expediente, Folga, Atestado, Abonado, Férias ou Falta.'],
       ['', 'Se o colaborador já tinha assinado a folha do mês, ele precisará assinar de novo.'],
       ['Holerites', 'Uma verba por linha (mesmo CPF e mês = mesmo holerite). Preencha Vencimento OU Desconto. Mês no formato mm/aaaa.'],
       ['', 'Importar de novo o mesmo CPF e mês substitui o holerite inteiro.'],
@@ -1394,10 +1399,10 @@ async function pontosDoMes(ref) {
 }
 function resumoColab(c, ref, regs) {
   const {dias, T} = calcularFolha(c, ref, regs);
-  const faltas = dias.filter(x => !x.futuro && x.prev && !x.trab && !x.m.length);
+  const faltas = dias.filter(x => !x.futuro && x.prev && !x.trab && !x.m.length && !x.abono);
   const minFalta = faltas.reduce((a, x) => a + x.atraso, 0), conta = oc => dias.filter(x => x.oc === oc).length;
   return {T, datasFalta: faltas.map(x => isoBR(x.iso).slice(0, 5)).join(', '), trabalhados: dias.filter(x => x.trab).length, faltas: faltas.length, minFalta, atraso: T.atraso - minFalta,
-    normais: T.trab - T.extra, ocorr: ['Atestado', 'Férias', 'Folga', 'Feriado', 'Sem expediente'].map(o => [o, conta(o)]).filter(([, n]) => n).map(([o, n]) => `${o}: ${n}`).join(' · ')};
+    normais: T.trab - T.extra, abonados: dias.filter(x => x.abono).map(x => isoBR(x.iso).slice(0, 5) + (x.obs ? ' (' + x.obs + ')' : '')).join(', '), ocorr: ['Atestado', 'Abonado', 'Férias', 'Folga', 'Feriado', 'Sem expediente'].map(o => [o, conta(o)]).filter(([, n]) => n).map(([o, n]) => `${o}: ${n}`).join(' · ')};
 }
 async function baixarResumo(btn) {
   const ref = $('rRef').value, obraSel = $('rObra') ? $('rObra').value : ''; if (!ref) return toast('Escolha o mês.');
@@ -1408,19 +1413,19 @@ async function baixarResumo(btn) {
       const assin = Object.fromEntries(confs.map(c => [c.colaborador_id, c.confirmado_em]));
       const H = m => ({t: 'n', v: (m || 0) / 1440, z: '[h]:mm'});
       const cab = ['Colaborador', 'CPF', 'Cargo', 'Obra', 'Centro de custo', 'Dias trabalhados', 'Horas previstas', 'Horas trabalhadas', 'Horas normais',
-        'Extras 50%', 'Extras 100%', 'Extras 110%', 'Total de extras', 'Atrasos', 'Faltas (dias)', 'Horas de falta', 'Dias das faltas',
+        'Extras 50%', 'Extras 100%', 'Extras 110%', 'Total de extras', 'Atrasos', 'Faltas (dias)', 'Horas de falta', 'Dias das faltas', 'Horas abonadas', 'Dias abonados',
         'Noturno 20%', 'Noturno 100%', 'Noturno 110%', 'Total noturno', 'Outras ocorrências', 'Folha assinada'];
       const linhas = equipe.filter(c => temFolha(c, ref, porColab[c.id]) && (!obraSel || (c.obra || '') === obraSel)).sort((a, b) => (a.obra || '').localeCompare(b.obra || '') || a.nome.localeCompare(b.nome)).map(c => {
         const r = resumoColab(c, ref, porColab[c.id] || []), T = r.T;
         return [c.nome, fmtCPF(c.cpf), c.cargo || '', c.obra || '', c.centro_custo || '', r.trabalhados, H(T.prev), H(T.trab), H(r.normais),
-          H(T.e50), H(T.e100), H(T.e110), H(T.extra), H(r.atraso), r.faltas, H(r.minFalta), r.datasFalta,
+          H(T.e50), H(T.e100), H(T.e110), H(T.extra), H(r.atraso), r.faltas, H(r.minFalta), r.datasFalta, H(T.abono), r.abonados,
           H(T.n20), H(T.n100), H(T.n110), H(T.not), r.ocorr, assin[c.id] ? 'Sim · ' + dataHora(assin[c.id]) : 'Não'];
       });
       if (!linhas.length) return toast(`Nenhuma folha lançada em ${refLabel(ref)}${obraSel ? ' na obra ' + obraSel : ''}.`);
       const soma = k => linhas.reduce((a, l) => a + (typeof l[k] === 'object' ? l[k].v * 1440 : +l[k] || 0), 0);
       const total = cab.map((_, k) => k === 0 ? 'TOTAL' : k < 5 ? '' : linhas.every(l => typeof l[k] === 'object') ? H(soma(k)) : linhas.every(l => typeof l[k] === 'number') ? soma(k) : '');
       const ws = X.utils.aoa_to_sheet([[`Resumo de horas · ${refLabel(ref)} · ${empresa.nome}${obraSel ? ' · Obra ' + obraSel : ''}`], [], cab, ...linhas, total]);
-      ws['!cols'] = cab.map((h, i) => ({wch: i === 0 ? 32 : ['Dias das faltas', 'Outras ocorrências', 'Folha assinada', 'Obra'].includes(h) ? 24 : Math.max(11, h.length + 2)}));
+      ws['!cols'] = cab.map((h, i) => ({wch: i === 0 ? 32 : ['Dias das faltas', 'Dias abonados', 'Outras ocorrências', 'Folha assinada', 'Obra'].includes(h) ? 24 : Math.max(11, h.length + 2)}));
       ws['!merges'] = [{s: {r: 0, c: 0}, e: {r: 0, c: 8}}];
       const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Resumo');
       X.writeFile(wb, `resumo-horas-${ref}${obraSel ? '-' + semAcento(obraSel).replace(/[^a-z0-9]+/g, '-') : ''}.xlsx`);

@@ -82,3 +82,12 @@ Tabelas de 2026 no `app.js` (constante `PARAM`). Quando o governo mudar as tabel
 | `logo.jpeg` | Logotipo da Lago Engenharia |
 | `supabase/schema.sql` | Tabelas, permissões e funções do banco |
 | `preview/` | Versão de demonstração com dados fictícios (não usa o Supabase) |
+
+## Abonar faltas e horas a menos
+
+Na tela do colaborador, clique em **Lançar faltas / ajustes** e, no dia, escolha a ocorrência **Abonado** (ou **Atestado**) e escreva o motivo em Observação.
+
+- Sem horários no dia: o dia inteiro é abonado e não conta como falta.
+- Com horários (ex.: saiu 2 h mais cedo): as horas que faltaram são abonadas e não viram atraso.
+
+As horas abonadas aparecem na folha, na tela do colaborador e no Resumo de horas (Excel), e não entram como desconto no cálculo do holerite.
