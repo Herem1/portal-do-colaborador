@@ -383,7 +383,7 @@ function trocarModoFolha(m) {
 }
 function folhaHTML(colab, ref, registros, conf) {
   const {dias, T} = calcularFolha(colab, ref, registros);
-  const ajuda = +colab.ajuda_custo || 0, saldo = T.extra - T.atraso;
+  const saldo = T.extra - T.atraso;
   // ----- tabela (igual ao modelo em PDF; também usada na impressão) -----
   const linhas = dias.map(x => {
     const dt = `${String(x.d).padStart(2, '0')}/${ref.slice(5, 7)}/${ref.slice(0, 4)}`;
@@ -434,23 +434,14 @@ function folhaHTML(colab, ref, registros, conf) {
     ${lista}${tabela}
     <div class="fp-bl">
       <h4>Resumo do mês</h4>
-      ${(() => {
-        const vh = valorHora(colab), V = vh > 0, {uteis, rep} = diasDSR(ref);
-        const v50 = r2(T.e50 / 60 * vh * 1.5), v100 = r2(T.e100 / 60 * vh * 2), v110 = r2(T.e110 / 60 * vh * 2.1);
-        const vnot = [20, 100, 110].reduce((a, k) => a + r2(T['n' + k] / HORA_NOTURNA * vh * k / 100), 0);
-        const dsr = uteis ? r2((v50 + v100 + v110 + vnot) / uteis * rep) : 0, vat = r2(T.atraso / 60 * vh), liq = v50 + v100 + v110 + vnot + dsr - vat;
-        const c = x => V ? `<td class="n">${x ? BRL(x) : '-'}</td>` : '';
-        return `<table class="mini"><thead><tr><th style="text-align:left">Descrição</th><th>Horas</th><th>Adicional</th>${V ? '<th>Valor</th>' : ''}</tr></thead><tbody>
-        <tr><td>Extras 50% (segunda a sexta)</td><td class="n">${hmOu(T.e50)}</td><td class="g">50%</td>${c(v50)}</tr>
-        <tr><td>Extras 100% (sábado)</td><td class="n">${hmOu(T.e100)}</td><td class="g">100%</td>${c(v100)}</tr>
-        <tr><td>Extras 110% (domingo e feriado)</td><td class="n">${hmOu(T.e110)}</td><td class="g">110%</td>${c(v110)}</tr>
-        ${[[20, 'segunda a sexta'], [100, 'sábado'], [110, 'domingo e feriado']].filter(([k]) => T['n' + k]).map(([k, lb]) => `<tr><td>Adicional noturno ${k}% (${lb} · 22h às 5h)</td><td class="n">${hm(T['n' + k])}</td><td class="g">${k}%</td>${c(r2(T['n' + k] / HORA_NOTURNA * vh * k / 100))}</tr>`).join('')}
-        ${V ? `<tr><td>DSR sobre extras e noturno (${rep} repousos / ${uteis} dias úteis)</td><td></td><td></td>${c(dsr)}</tr>` : ''}
-        <tr><td>Desconto de atrasos / faltas</td><td class="n">${hmOu(T.atraso)}</td><td></td>${V ? `<td class="n">${vat ? '−' + BRL(vat) : '-'}</td>` : ''}</tr>
-        <tr><td>Ajuda de custo (mensal)</td><td class="n" colspan="${V ? 3 : 2}">${ajuda ? BRL(ajuda) : '-'}</td></tr>
-        <tr class="tot"><td>Saldo (extras – atrasos)</td><td class="n">${hm(saldo)}</td><td></td>${V ? `<td class="n">${liq < 0 ? '−' : ''}${BRL(Math.abs(liq))}</td>` : ''}</tr>
-      </tbody></table>${V ? `<div class="muted" style="font-size:11.5px;margin-top:6px">Valores brutos estimados com hora de ${BRL(vh)} (salário ÷ ${horasMes(colab)} h). Os valores finais, com INSS e IRRF, saem no holerite.</div>` : ''}`;
-      })()}
+      <table class="mini"><thead><tr><th style="text-align:left">Descrição</th><th>Horas</th><th>Adicional</th></tr></thead><tbody>
+        <tr><td>Extras 50% (segunda a sexta)</td><td class="n">${hmOu(T.e50)}</td><td class="g">50%</td></tr>
+        <tr><td>Extras 100% (sábado)</td><td class="n">${hmOu(T.e100)}</td><td class="g">100%</td></tr>
+        <tr><td>Extras 110% (domingo e feriado)</td><td class="n">${hmOu(T.e110)}</td><td class="g">110%</td></tr>
+        ${[[20, 'segunda a sexta'], [100, 'sábado'], [110, 'domingo e feriado']].filter(([k]) => T['n' + k]).map(([k, lb]) => `<tr><td>Adicional noturno ${k}% (${lb} · 22h às 5h)</td><td class="n">${hm(T['n' + k])}</td><td class="g">${k}%</td></tr>`).join('')}
+        <tr><td>Atrasos / faltas</td><td class="n">${hmOu(T.atraso)}</td><td></td></tr>
+        <tr class="tot"><td>Saldo (extras – atrasos)</td><td class="n">${hm(saldo)}</td><td></td></tr>
+      </tbody></table>
     </div>
     ${conf ? seloAssinatura(conf.assinatura, conf.confirmado_em, conf.codigo, conf.ip, colab.nome) : ''}
     <div class="assin"><div>Assinatura do colaborador<br><small>${esc(colab.nome)}</small>${conf && !conf.assinatura ? `<br><small style="color:var(--green)">✓ Confirmado pelo portal em ${dataHora(conf.confirmado_em)}</small>` : ''}</div><div>Assinatura do responsável</div></div>
