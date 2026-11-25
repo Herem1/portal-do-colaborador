@@ -809,7 +809,6 @@ async function verColab(id, refSel) {
 
         <div class="card cx-card"><div class="card-b">
           <div class="cx-t"><span>Dados</span></div>
-          ${kv('Salário base', BRL(c.salario))}
           ${kv('Horário', horarioTexto(c))}${kv('Centro de custo', c.centro_custo)}${kv('Código', c.codigo)}
           ${kv('Telefone', c.tel)}${kv('E-mail', c.email)}
         </div></div>
@@ -870,7 +869,6 @@ function editarColab(id) {
       </tbody></table>
       <button type="button" class="linkbtn" style="font-size:13px" onclick="copiarSegunda()">Copiar o horário de segunda para terça a quinta</button>
       <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:10px"><input type="checkbox" id="f_ponto_auto" ${pontoAuto(c) ? 'checked' : ''} style="width:20px;height:20px;flex:none"> <span><b>Ponto automático</b>: todo dia de trabalho já entra com este horário. O RH só lança faltas e mudanças.</span></label></div>
-    ${f('salario', 'Salário base (R$)', 'number', 'step="0.01" min="0" inputmode="decimal"')}
     <div class="row2">${f('dependentes', 'Dependentes (IRRF)', 'number', 'step="1" min="0" inputmode="numeric"')}<div></div></div>
     <div class="row2">${f('email', 'E-mail', 'email')}${f('tel', 'Telefone', 'tel')}</div>
     ${f('banco', 'Banco / conta')}
@@ -900,7 +898,7 @@ async function salvarColab(id, btn) {
   if (situacao === 'Desligado' && !demissao) return erro('Informe a data do desligamento.');
   const o = k => v(k) || null;
   const dados = {nome: v('nome'), codigo: o('codigo'), cargo: o('cargo'), cbo: o('cbo'), departamento: o('departamento'), filial: o('filial'), centro_custo: o('centro_custo'), lotacao: o('lotacao'), obra: o('obra'),
-    tipo_salario: v('tipo_salario'), admissao: o('admissao'), jornada, horario, ponto_auto: $('f_ponto_auto').checked, situacao, demissao, email: o('email'), tel: o('tel'), salario: +v('salario') || 0, dependentes: Math.max(0, Math.round(+v('dependentes') || 0)), banco: o('banco')};
+    tipo_salario: v('tipo_salario'), admissao: o('admissao'), jornada, horario, ponto_auto: $('f_ponto_auto').checked, situacao, demissao, email: o('email'), tel: o('tel'), dependentes: Math.max(0, Math.round(+v('dependentes') || 0)), banco: o('banco')};
   await comBotao(btn, async () => {
     try {
       let novoId = id;
@@ -1118,7 +1116,7 @@ function gerarHolerite(colab, ref, registros, op = {}) {
 /* ---- tela: gerar holerite pela folha ---- */
 function abrirGerador(colabId, ref, hid) {
   const c = cacheEquipe.find(x => x.id === colabId); if (!c) return;
-  if (!(+c.salario)) return toast('Informe o salário base no cadastro do colaborador antes de calcular.');
+  if (!(+c.salario)) return toast('Este colaborador não tem salário base. Importe o salário pela planilha (aba Colaboradores) antes de calcular.');
   sheet('Calcular holerite pela folha', `
     <p class="muted" style="margin-top:0">O portal lê a folha de ponto de <b>${esc(c.nome)}</b> e monta o holerite: horas normais, extras 50%/100%/110%, DSR sobre extras, atrasos e faltas, INSS, IRRF e FGTS (tabelas de ${PARAM.ano}). Depois você confere e salva.</p>
     <div class="field"><label for="gRef">Mês da folha</label><input id="gRef" type="month" value="${ref || mesTrab()}"></div>
