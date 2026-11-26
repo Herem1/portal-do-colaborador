@@ -715,7 +715,7 @@ const nomeDe = id => (cacheEquipe.find(c => c.id === id) || {}).nome || '—';
 let statusOk = {};
 async function vEquipe() {
   const ant = mesTrab();
-  const [l, pts, confs] = await Promise.all([carregarEquipe(),
+  const [l, , pts, confs] = await Promise.all([carregarEquipe(), carregarPendAbertas(),
     q(sb.from('pontos').select('colaborador_id').gte('dia', ant + '-01').lte('dia', fimDoMes(ant))),
     q(sb.from('confirmacoes').select('colaborador_id').eq('ref', ant))]);
   const com = new Set(pts.map(p => p.colaborador_id)), ok = new Set(confs.map(c => c.colaborador_id));
@@ -725,34 +725,72 @@ async function vEquipe() {
   <div class="row2" style="margin-bottom:10px"><button class="btn btn-ghost" onclick="abrirImportacao()">Importar planilha (Excel)</button><button class="btn btn-ghost" onclick="abrirResumo()">Resumo de horas (Excel)</button></div>
   <div class="filtros"><input class="srch" type="search" placeholder="Buscar por nome, CPF ou cargo" aria-label="Buscar colaborador" value="${esc(busca)}" oninput="busca=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()">
     <select class="srch" aria-label="Filtrar por situação" onchange="filtroSit=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()">${[['Ativo', 'Ativos'], ['Desligado', 'Desligados'], ['', 'Todos']].map(([v, lb]) => `<option value="${v}" ${v === filtroSit ? 'selected' : ''}>${lb} (${l.filter(c => !v || (c.situacao || 'Ativo') === v).length})</option>`).join('')}</select>
-    ${obras().length ? `<select class="srch" aria-label="Filtrar por obra" onchange="filtroObra=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()"><option value="">Todas as obras / projetos</option>${obras().map(o => `<option ${o === filtroObra ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>` : ''}</div>
+    ${obras().length ? `<select class="srch" aria-label="Filtrar por obra" onchange="filtroObra=this.value;$('lista').innerHTML=listaEquipe();contarEquipe()"><option value="">Todas as obras / projetos</option>${obras().map(o => `<option ${o === filtroObra ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>` : ''}
+    <select class="srch" aria-label="Filtrar por pendências" onchange="filtroPend=this.value==='1';$('lista').innerHTML=listaEquipe();contarEquipe()"><option value="">Com e sem pendências</option><option value="1" ${filtroPend ? 'selected' : ''}>Só com pendências (${l.filter(c => pendAbertas[c.id]).length})</option></select></div>
   <div class="sec-t" id="contEq"></div>
   <div class="card" id="lista">${listaEquipe()}</div>
   <button class="fab" aria-label="Adicionar colaborador" onclick="editarColab()">${sv(IC.plus, 24)}</button>`;
 }
 const obras = () => [...new Set(cacheEquipe.map(c => (c.obra || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-function contarEquipe() { const n = document.querySelectorAll('#lista .item').length, e = $('contEq'); if (e) e.textContent = `${n} colaborador${n === 1 ? '' : 'es'}${filtroSit ? ' ' + (filtroSit === 'Ativo' ? 'ativo' : 'desligado') + (n === 1 ? '' : 's') : ''}${filtroObra ? ' · ' + filtroObra : ''}`; }
+function contarEquipe() { const n = document.querySelectorAll('#lista .item').length, e = $('contEq'); if (e) e.textContent = `${n} colaborador${n === 1 ? '' : 'es'}${filtroSit ? ' ' + (filtroSit === 'Ativo' ? 'ativo' : 'desligado') + (n === 1 ? '' : 's') : ''}${filtroObra ? ' · ' + filtroObra : ''}${filtroPend ? ' · com pendências' : ''}`; }
 function listaEquipe() {
   const t = busca.toLowerCase().trim(), dq = soDig(busca);
-  const l = cacheEquipe.filter(c => (!filtroSit || (c.situacao || 'Ativo') === filtroSit) && (!filtroObra || (c.obra || '') === filtroObra)).filter(c => !t || c.nome.toLowerCase().includes(t) || (c.cargo || '').toLowerCase().includes(t) || (dq && c.cpf.includes(dq)));
+  const l = cacheEquipe.filter(c => (!filtroSit || (c.situacao || 'Ativo') === filtroSit) && (!filtroObra || (c.obra || '') === filtroObra) && (!filtroPend || pendAbertas[c.id])).filter(c => !t || c.nome.toLowerCase().includes(t) || (c.cargo || '').toLowerCase().includes(t) || (dq && c.cpf.includes(dq)));
   return l.length ? l.map(c => `<button class="item" onclick="verColab('${c.id}')"><div class="av">${esc(ini(c.nome))}</div>
       <div style="min-width:0;flex:1"><div class="t">${esc(c.nome)}</div><div class="d">${esc(c.cargo || 'Sem cargo')}${c.obra ? ' · ' + esc(c.obra) : ''} · ${fmtCPF(c.cpf)}</div>
-      <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${desligado(c) ? `<span class="tag t-neutral">Desligado${c.demissao ? ' em ' + isoBR(c.demissao) : ''}</span>` : c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${desligado(c) ? '' : statusOk[c.id] === 'ok' ? `<span class="tag t-ok">Folha assinada · ${MESES[+mesTrab().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? (mesTrab() >= agoraBR().iso.slice(0, 7) ? `<span class="tag t-neutral">Folha de ${MESES[+mesTrab().slice(5) - 1]} em andamento</span>` : `<span class="tag t-neutral">Folha de ${MESES[+mesTrab().slice(5) - 1]} sem assinatura</span>`) : ''}</div></div>
+      <div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">${pendAbertas[c.id] ? `<span class="tag t-warn">📌 ${pendAbertas[c.id]} pendência${pendAbertas[c.id] > 1 ? 's' : ''}</span>` : ''}${desligado(c) ? `<span class="tag t-neutral">Desligado${c.demissao ? ' em ' + isoBR(c.demissao) : ''}</span>` : c.user_id ? '' : '<span class="tag t-warn">Aguardando 1º acesso</span>'}${desligado(c) ? '' : statusOk[c.id] === 'ok' ? `<span class="tag t-ok">Folha assinada · ${MESES[+mesTrab().slice(5) - 1]}</span>` : statusOk[c.id] === 'pend' ? (mesTrab() >= agoraBR().iso.slice(0, 7) ? `<span class="tag t-neutral">Folha de ${MESES[+mesTrab().slice(5) - 1]} em andamento</span>` : `<span class="tag t-neutral">Folha de ${MESES[+mesTrab().slice(5) - 1]} sem assinatura</span>`) : ''}</div></div>
       <span class="chev">${sv(IC.chev)}</span></button>`).join('')
     : `<div class="empty">${cacheEquipe.length ? 'Ninguém encontrado.' : 'Nenhum colaborador cadastrado ainda.<br>Toque no botão + para adicionar.'}</div>`;
+}
+/* ---------- Pendências do colaborador (só o RH vê; protegido no banco) ---------- */
+let colabAberto = null, pendAbertas = {}, filtroPend = false;
+function pendHTML(id, pends) {
+  if (pends === null) return '<div class="muted">Para usar as pendências, rode o arquivo <b>supabase/pendencias.sql</b> no Supabase.</div>';
+  const hoje = agoraBR().iso, ab = pends.filter(p => !p.feita), ok = pends.filter(p => p.feita);
+  const item = p => `<div class="pd ${p.feita ? 'feita' : ''}">
+      <input type="checkbox" aria-label="Marcar como resolvida" ${p.feita ? 'checked' : ''} onchange="marcarPend(${p.id}, this.checked)">
+      <div class="pd-t"><div>${esc(p.texto)}</div><small>${p.prazo ? `<span class="${!p.feita && p.prazo < hoje ? 'pd-atr' : ''}">Prazo ${isoBR(p.prazo)}${!p.feita && p.prazo < hoje ? ' · atrasada' : ''}</span> · ` : ''}${p.feita && p.feita_em ? 'Resolvida em ' + dataHora(p.feita_em) : 'Anotada em ' + dataHora(p.criado_em)}</small></div>
+      <button class="pd-x" aria-label="Apagar pendência" onclick="apagarPend(${p.id})">×</button></div>`;
+  return `${ab.length ? ab.map(item).join('') : '<div class="muted" style="margin:4px 0 8px">Nenhuma pendência em aberto.</div>'}
+    <div class="pd-novo"><input id="pdTexto" maxlength="500" placeholder="Ex.: entregar atestado, assinar contrato…" onkeydown="if(event.key==='Enter')novaPend('${id}')"><input id="pdPrazo" type="date" aria-label="Prazo (opcional)" title="Prazo (opcional)"><button class="btn btn-primary btn-sm" onclick="novaPend('${id}')">Adicionar</button></div>
+    ${ok.length ? `<details class="pd-ok"><summary>Resolvidas (${ok.length})</summary>${ok.map(item).join('')}</details>` : ''}`;
+}
+async function novaPend(id) {
+  const t = $('pdTexto').value.trim(), pz = $('pdPrazo').value || null; if (!t) return toast('Escreva a pendência.');
+  try { await q(sb.from('pendencias').insert({colaborador_id: id, texto: t, prazo: pz})); await atualizarPend(); } catch (e) { toast(erroMsg(e)); }
+}
+async function marcarPend(pid, feita) {
+  try { await q(sb.from('pendencias').update({feita, feita_em: feita ? new Date().toISOString() : null}).eq('id', pid)); await atualizarPend(); } catch (e) { toast(erroMsg(e)); }
+}
+async function apagarPend(pid) {
+  if (!confirm('Apagar esta pendência?')) return;
+  try { await q(sb.from('pendencias').delete().eq('id', pid)); await atualizarPend(); } catch (e) { toast(erroMsg(e)); }
+}
+async function atualizarPend() {
+  if (!colabAberto) return;
+  const y = document.querySelector('.sheet-b')?.scrollTop;
+  await carregarPendAbertas(); if ($('lista')) { $('lista').innerHTML = listaEquipe(); contarEquipe(); }
+  await verColab(colabAberto.id, colabAberto.ref);
+  const el = document.querySelector('.sheet-b'); if (el && y) el.scrollTop = y;
+}
+async function carregarPendAbertas() {
+  try { const l = await q(sb.from('pendencias').select('colaborador_id').eq('feita', false)); pendAbertas = {}; l.forEach(p => pendAbertas[p.colaborador_id] = (pendAbertas[p.colaborador_id] || 0) + 1); }
+  catch (e) { pendAbertas = {}; }
 }
 async function verColab(id, refSel) {
   const c = cacheEquipe.find(x => x.id === id); if (!c) return;
   const atual = agoraBR().iso.slice(0, 7), ref = refSel || mesTrab();
   sheetCarregando(esc(c.nome));
   try {
-    const [hs, confs, cod, as, regs] = await Promise.all([
+    const [hs, confs, cod, as, regs, pends] = await Promise.all([
       q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', id).order('ref', {ascending:false})),
       q(sb.from('confirmacoes').select('ref,confirmado_em').eq('colaborador_id', id)),
       c.user_id ? Promise.resolve(null) : q(sb.rpc('codigo_acesso', {p_colab: id})),
       q(sb.from('assinaturas_holerite').select('holerite_id,assinado_em').eq('colaborador_id', id)),
-      q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref)))
+      q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref))),
+      q(sb.from('pendencias').select('id,texto,prazo,feita,criado_em,feita_em').eq('colaborador_id', id).order('criado_em', {ascending:false})).catch(() => null)
     ]);
+    colabAberto = {id, ref};
     const assDe = hid => as.find(a => a.holerite_id === hid);
     const tem = temFolha(c, ref, regs), r = resumoColab(c, ref, regs), T = r.T, cf = confs.find(x => x.ref === ref), hRef = hs.find(h => h.ref === ref);
     const kpi = (lb, v, cls = '') => `<div><small>${lb}</small><b class="${cls}">${v}</b></div>`;
@@ -811,6 +849,11 @@ async function verColab(id, refSel) {
           <div class="cx-t"><span>Dados</span></div>
           ${kv('Horário', horarioTexto(c))}${kv('Centro de custo', c.centro_custo)}${kv('Código', c.codigo)}
           ${kv('Telefone', c.tel)}${kv('E-mail', c.email)}
+        </div></div>
+
+        <div class="card cx-card cx-pend"><div class="card-b">
+          <div class="cx-t"><span>Pendências</span><span class="tag t-neutral">🔒 só o RH vê</span></div>
+          ${pendHTML(id, pends)}
         </div></div>
 
         <div class="card cx-card"><div class="card-b">

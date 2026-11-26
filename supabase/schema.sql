@@ -357,3 +357,23 @@ revoke execute on function public.codigo_folha(uuid, text), public.codigo_holeri
 grant execute on function public.confirmar_folha(text, text, text)  to authenticated;
 grant execute on function public.assinar_holerite(bigint, text, text) to authenticated;
 grant execute on function public.ip_da_requisicao() to authenticated;
+
+-- ---------- Pendências (só o RH) ----------
+create table if not exists public.pendencias (
+  id bigint generated always as identity primary key,
+  colaborador_id uuid not null references public.colaboradores(id) on delete cascade,
+  texto text not null check (length(texto) between 1 and 500),
+  prazo date,
+  feita boolean not null default false,
+  feita_em timestamptz,
+  criado_em timestamptz not null default now()
+);
+create index if not exists pendencias_colab on public.pendencias (colaborador_id);
+
+alter table public.pendencias enable row level security;
+drop policy if exists "pendencias: só rh" on public.pendencias;
+create policy "pendencias: só rh" on public.pendencias for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+
+revoke all on public.pendencias from anon;
+grant select, insert, update, delete on public.pendencias to authenticated;

@@ -91,3 +91,9 @@ Na tela do colaborador, clique em **Lançar faltas / ajustes** e, no dia, escolh
 - Com horários (ex.: saiu 2 h mais cedo): as horas que faltaram são abonadas e não viram atraso.
 
 As horas abonadas aparecem na folha, na tela do colaborador e no Resumo de horas (Excel), e não entram como desconto no cálculo do holerite.
+
+## Pendências do colaborador (só o RH)
+
+Na tela do colaborador há o quadro **Pendências**: escreva o que falta (ex.: entregar atestado), coloque um prazo se quiser e marque quando resolver. Na Equipe, quem tem pendência em aberto aparece com 📌 e há o filtro “Só com pendências”.
+
+Só o acesso do RH vê. A proteção está no banco (RLS): o colaborador não consegue ler as pendências nem pela API. Para ativar, rode uma vez o arquivo `supabase/pendencias.sql` no Supabase.

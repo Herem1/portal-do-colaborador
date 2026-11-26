@@ -3,7 +3,7 @@
    Usado só na página de demonstração. O site real usa o Supabase.
    ===================================================== */
 (function () {
-  const LS = 'portal-colab-previa-v8';
+  const LS = 'portal-colab-previa-v9';
   const uid = () => 'u' + Math.random().toString(16).slice(2, 10) + '-0000-0000-0000-000000000000';
   const pad = n => String(n).padStart(2, '0');
   const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -12,7 +12,7 @@
   function seed() {
     const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
     const DB = {users: [], admins: [], empresa: [{id: 1, nome: 'Lago Engenharia', cnpj: '00.000.000/0001-00', logo: null}],
-      colaboradores: [], pontos: [], holerites: [], avisos: [], confirmacoes: [], seq: 100};
+      colaboradores: [], pontos: [], holerites: [], avisos: [], confirmacoes: [], pendencias: [], seq: 100};
     const rh = {id: uid(), email: 'rh@empresa.com', password: 'demo123'}; DB.users.push(rh); DB.admins.push(rh.id);
     const maria = {id: uid(), email: '11111111111@colaborador.portal-rh.app', password: '123456'}; DB.users.push(maria);
     const jor = ['', '09:00', '09:00', '09:00', '09:00', '08:00', ''];
@@ -42,6 +42,7 @@
               {codigo: '200', desc: 'HORAS EXTRAS 100%', ref: '16,00', tipo: 'p', valor: 407.27}, {codigo: '201', desc: 'HORAS EXTRAS 50%', ref: '10,00', tipo: 'p', valor: 190.91},
               {codigo: '998', desc: 'I.N.S.S.', ref: '9,00', tipo: 'd', valor: 320.5}, {codigo: '981', desc: 'DESC.ADIANT.SALARIAL', ref: '1.120,00', tipo: 'd', valor: 1120}],
       rodape: {salario_base: 2800, sal_contr_inss: 3556.58, base_fgts: 3556.58, fgts_mes: 284.53, base_irrf: 2116.08, faixa_irrf: 0}});
+    DB.pendencias.push({id: DB.seq++, colaborador_id: 'c2', texto: 'Entregar cópia da CNH e comprovante de endereço', prazo: isoDe(new Date(hoje.getTime() + 5 * 864e5)), feita: false, feita_em: null, criado_em: new Date().toISOString()});
     DB.avisos.push({id: DB.seq++, titulo: 'Holerite disponível', texto: 'O holerite do mês passado já está na aba Holerites.', criado_em: new Date().toISOString()},
                    {id: DB.seq++, titulo: 'Confraternização de fim de ano', texto: 'Dia 18/12, a partir das 17h. Confirme presença com o RH.', criado_em: new Date(Date.now() - 3 * 864e5).toISOString()});
     DB.assinaturas_holerite = [];
@@ -64,6 +65,7 @@
   // Mesmas regras de permissão do banco real
   const podeVer = (t, r) => {
     if (!me()) return false;
+    if (t === 'pendencias') return isAdmin();   // só o RH
     if (t === 'avisos' || t === 'empresa' || isAdmin()) return true;
     if (t === 'colaboradores') return r.user_id === me();
     return r.colaborador_id === meuColab();
@@ -82,10 +84,10 @@
     };
     b['delete'] = () => { op = 'del'; return b; };
     function run() {
-      const T = DB[t];
+      const T = DB[t] = DB[t] || [];
       if (op !== 'select' && !podeGravar()) throw new Error('new row violates row-level security policy');
       if (op === 'insert') {
-        const arr = [].concat(payload).map(p => ({id: t === 'colaboradores' ? 'c' + (DB.seq++) : DB.seq++, criado_em: new Date().toISOString(), ...(t === 'colaboradores' ? {user_id: null, codigo_acesso: Math.random().toString(16).slice(2, 8).toUpperCase(), jornada: ['', '09:00', '09:00', '09:00', '09:00', '08:00', '']} : {}), ...p}));
+        const arr = [].concat(payload).map(p => ({id: t === 'colaboradores' ? 'c' + (DB.seq++) : DB.seq++, criado_em: new Date().toISOString(), ...(t === 'pendencias' ? {feita: false, feita_em: null, prazo: null} : {}), ...(t === 'colaboradores' ? {user_id: null, codigo_acesso: Math.random().toString(16).slice(2, 8).toUpperCase(), jornada: ['', '09:00', '09:00', '09:00', '09:00', '08:00', '']} : {}), ...p}));
         if (t === 'colaboradores') arr.forEach(r => { if (T.some(x => x.cpf === r.cpf)) throw new Error('duplicate key value violates unique constraint "colaboradores_cpf_key"'); });
         if (t === 'holerites') arr.forEach(r => { if (T.some(x => x.colaborador_id === r.colaborador_id && x.ref === r.ref)) throw new Error('duplicate key value violates unique constraint "holerites_colaborador_id_ref_key"'); });
         T.push(...arr); if (t === 'pontos') arr.forEach(x => invalidaFolha(x.colaborador_id, x.dia)); return {data: single ? {id: arr[0].id} : arr.map(x => ({id: x.id, cpf: x.cpf})), error: null};
