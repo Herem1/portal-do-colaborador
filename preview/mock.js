@@ -3,7 +3,7 @@
    Usado só na página de demonstração. O site real usa o Supabase.
    ===================================================== */
 (function () {
-  const LS = 'portal-colab-previa-v9';
+  const LS = 'portal-colab-previa-v10';
   const uid = () => 'u' + Math.random().toString(16).slice(2, 10) + '-0000-0000-0000-000000000000';
   const pad = n => String(n).padStart(2, '0');
   const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -37,7 +37,7 @@
       }
     }
     const refAnt = `${ini.getFullYear()}-${pad(ini.getMonth() + 1)}`;
-    DB.holerites.push({id: DB.seq++, colaborador_id: 'c1', ref: refAnt, obs: null, criado_em: new Date().toISOString(),
+    DB.holerites.push({id: DB.seq++, tipo: 'Mensal', colaborador_id: 'c1', ref: refAnt, obs: null, criado_em: new Date().toISOString(),
       itens: [{codigo: '1', desc: 'HORAS NORMAIS', ref: '220,00', tipo: 'p', valor: 2800}, {codigo: '250', desc: 'REFLEXO EXTRAS DSR', ref: '0,00', tipo: 'p', valor: 158.4},
               {codigo: '200', desc: 'HORAS EXTRAS 100%', ref: '16,00', tipo: 'p', valor: 407.27}, {codigo: '201', desc: 'HORAS EXTRAS 50%', ref: '10,00', tipo: 'p', valor: 190.91},
               {codigo: '998', desc: 'I.N.S.S.', ref: '9,00', tipo: 'd', valor: 320.5}, {codigo: '981', desc: 'DESC.ADIANT.SALARIAL', ref: '1.120,00', tipo: 'd', valor: 1120}],
@@ -89,7 +89,7 @@
       if (op === 'insert') {
         const arr = [].concat(payload).map(p => ({id: t === 'colaboradores' ? 'c' + (DB.seq++) : DB.seq++, criado_em: new Date().toISOString(), ...(t === 'pendencias' ? {feita: false, feita_em: null, prazo: null} : {}), ...(t === 'colaboradores' ? {user_id: null, codigo_acesso: Math.random().toString(16).slice(2, 8).toUpperCase(), jornada: ['', '09:00', '09:00', '09:00', '09:00', '08:00', '']} : {}), ...p}));
         if (t === 'colaboradores') arr.forEach(r => { if (T.some(x => x.cpf === r.cpf)) throw new Error('duplicate key value violates unique constraint "colaboradores_cpf_key"'); });
-        if (t === 'holerites') arr.forEach(r => { if (T.some(x => x.colaborador_id === r.colaborador_id && x.ref === r.ref)) throw new Error('duplicate key value violates unique constraint "holerites_colaborador_id_ref_key"'); });
+        if (t === 'holerites') arr.forEach(r => { r.tipo = r.tipo || 'Mensal'; if (T.some(x => x.colaborador_id === r.colaborador_id && x.ref === r.ref && (x.tipo || 'Mensal') === r.tipo)) throw new Error('duplicate key value violates unique constraint "holerites_colaborador_id_ref_tipo_key"'); });
         T.push(...arr); if (t === 'pontos') arr.forEach(x => invalidaFolha(x.colaborador_id, x.dia)); return {data: single ? {id: arr[0].id} : arr.map(x => ({id: x.id, cpf: x.cpf})), error: null};
       }
       if (op === 'upsert') {
@@ -98,7 +98,7 @@
       }
       let r = T.filter(x => filters.every(f => f(x)));
       if (op === 'update') {
-        if (t === 'holerites' && payload.ref) r.forEach(x => { if (T.some(y => y !== x && y.colaborador_id === x.colaborador_id && y.ref === payload.ref)) throw new Error('duplicate key value violates unique constraint "holerites_colaborador_id_ref_key"'); });
+        if (t === 'holerites' && payload.ref) r.forEach(x => { const tp = payload.tipo || x.tipo || 'Mensal'; if (T.some(y => y !== x && y.colaborador_id === x.colaborador_id && y.ref === payload.ref && (y.tipo || 'Mensal') === tp)) throw new Error('duplicate key value violates unique constraint "holerites_colaborador_id_ref_key"'); });
         r.forEach(x => { if (t === 'pontos') invalidaFolha(x.colaborador_id, x.dia); if (t === 'holerites') invalidaHol(x.id); Object.assign(x, payload); }); return {data: null, error: null};
       }
       if (op === 'del') {

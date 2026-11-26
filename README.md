@@ -97,3 +97,13 @@ As horas abonadas aparecem na folha, na tela do colaborador e no Resumo de horas
 Na tela do colaborador há o quadro **Pendências**: escreva o que falta (ex.: entregar atestado), coloque um prazo se quiser e marque quando resolver. Na Equipe, quem tem pendência em aberto aparece com 📌 e há o filtro “Só com pendências”.
 
 Só o acesso do RH vê. A proteção está no banco (RLS): o colaborador não consegue ler as pendências nem pela API. Para ativar, rode uma vez o arquivo `supabase/pendencias.sql` no Supabase.
+
+## Holerite de 13º, férias e outros
+
+Cada holerite tem um **Tipo**: Mensal, 13º salário · 1ª parcela, 13º salário · 2ª parcela, Férias, Adiantamento ou Rescisão. Assim o holerite mensal e o do 13º convivem no mesmo mês.
+
+- **À mão:** Holerites → Lançar holerite à mão → escolha o mês e o Tipo.
+- **Excel:** na aba Holerites, coluna **Tipo** (em branco = Mensal; ex.: “13º 1ª parcela”).
+- Holerites que não são o mensal abrem para o colaborador sem precisar assinar a folha de ponto antes.
+
+Para ativar, rode uma vez `supabase/tipo-holerite.sql` no Supabase.

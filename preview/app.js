@@ -73,7 +73,7 @@ const erroMsg = e => {
   if (/Password should be at least/i.test(m)) return 'A senha precisa ter pelo menos 6 caracteres.';
   if (/Failed to fetch|NetworkError/i.test(m)) return 'Sem conexão. Verifique a internet e tente de novo.';
   if (/duplicate key.*cpf/i.test(m)) return 'Já existe um colaborador com este CPF.';
-  if (/duplicate key.*colaborador_id_ref/i.test(m)) return 'Esse colaborador já tem holerite neste mês. Abra o existente para editar.';
+  if (/duplicate key.*colaborador_id_ref/i.test(m)) return 'Esse colaborador já tem um holerite deste tipo neste mês. Abra o existente para editar.';
   return m;
 };
 const emailDoCPF = cpf => `${soDig(cpf)}@${CFG.DOMINIO_LOGIN || 'colaborador.portal-rh.app'}`;
@@ -463,7 +463,7 @@ function holeriteHTML(h, c, ass) {
     <div class="hb">
       <div class="r"><div>${esc((empresa.nome || '').toUpperCase())}<br><span class="nw">CNPJ: ${esc(empresa.cnpj || '')}</span></div>
         <div style="text-align:center">CC: ${esc((c.lotacao || '').toUpperCase())}<br>${esc(c.tipo_salario || 'Mensalista')}</div>
-        <div style="text-align:right" class="nw">Folha Mensal<br>${cap(MESES[+h.ref.slice(5, 7) - 1])} de ${h.ref.slice(0, 4)}</div></div>
+        <div style="text-align:right" class="nw">${mensal(h) ? 'Folha Mensal' : esc(tipoHol(h))}<br>${cap(MESES[+h.ref.slice(5, 7) - 1])} de ${h.ref.slice(0, 4)}</div></div>
     </div>
     <div class="hb">
       <div class="r"><div style="flex:0 0 auto"><span class="lb">Código</span>${esc(c.codigo || '')}</div>
@@ -561,11 +561,11 @@ async function vInicio() {
   const c = sess.colab, ref = agoraBR().iso.slice(0, 7);
   const [regs, hs, av] = await Promise.all([
     q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', c.id).gte('dia', ref + '-01').lte('dia', fimDoMes(ref))),
-    q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', c.id).order('ref', {ascending:false}).limit(1)),
+    q(sb.from('holerites').select('*').eq('colaborador_id', c.id).order('ref', {ascending:false}).limit(3)),
     q(sb.from('avisos').select('*').order('criado_em', {ascending:false}).limit(5))
   ]);
-  const {T} = calcularFolha(c, ref, regs), h = hs[0];
-  const pend = await folhasPendentes(c.id, [mesAnterior(), ...(h ? [h.ref] : [])], c);
+  const {T} = calcularFolha(c, ref, regs), h = hs.sort(ordHol)[0];
+  const pend = await folhasPendentes(c.id, [mesAnterior(), ...(h && mensal(h) ? [h.ref] : [])], c);
   const p1 = [...pend].sort()[0];
   return `
   ${p1 ? `<div class="card" style="border-color:#f1d59a;background:var(--amber-soft)"><div class="card-b">
@@ -579,8 +579,8 @@ async function vInicio() {
       <div style="flex:1"><div class="big" style="color:var(--green)">${hm(T.extra)}</div><div class="muted">horas extras</div></div>
     </div>
   </button>
-  ${h ? `<button class="card item" style="border:1px solid var(--line)" onclick="${pend.has(h.ref) ? `irParaFolha('${h.ref}');toast('Assine a folha de ${refLabel(h.ref)} para abrir o holerite.')` : `verHolerite(${h.id})`}">
-    <div><div class="d">Último holerite · ${refLabel(h.ref)}</div>${pend.has(h.ref) ? `<div class="t" style="font-size:16px;margin-top:2px">🔒 Assine a folha para abrir</div>` : `<div class="t" style="font-size:22px;margin-top:2px">${BRL(totais(h).l)}</div><div class="d">valor líquido</div>`}</div>
+  ${h ? `<button class="card item" style="border:1px solid var(--line)" onclick="${(mensal(h) && pend.has(h.ref)) ? `irParaFolha('${h.ref}');toast('Assine a folha de ${refLabel(h.ref)} para abrir o holerite.')` : `verHolerite(${h.id})`}">
+    <div><div class="d">Último holerite · ${esc(nomeHol(h))}</div>${(mensal(h) && pend.has(h.ref)) ? `<div class="t" style="font-size:16px;margin-top:2px">🔒 Assine a folha para abrir</div>` : `<div class="t" style="font-size:22px;margin-top:2px">${BRL(totais(h).l)}</div><div class="d">valor líquido</div>`}</div>
     <span class="chev">${sv(IC.chev)}</span></button>` : `<div class="card"><div class="empty">Nenhum holerite disponível ainda.</div></div>`}
   <div class="card"><div class="card-h"><h3>Avisos do RH</h3></div>
     ${av.length ? av.map(avisoHTML).join('') : '<div class="empty">Nenhum aviso no momento.</div>'}
@@ -622,14 +622,14 @@ async function vPonto() {
 }
 
 async function vHolerites() {
-  const [l, as] = await Promise.all([q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', sess.colab.id).order('ref', {ascending:false})),
+  const [l, as] = await Promise.all([q(sb.from('holerites').select('*').eq('colaborador_id', sess.colab.id).order('ref', {ascending:false})).then(l => l.sort(ordHol)),
     q(sb.from('assinaturas_holerite').select('holerite_id').eq('colaborador_id', sess.colab.id))]);
-  const pend = await folhasPendentes(sess.colab.id, l.map(h => h.ref), sess.colab), assinados = new Set(as.map(a => a.holerite_id));
-  return `<div class="card">${l.length ? l.map(h => pend.has(h.ref)
+  const pend = await folhasPendentes(sess.colab.id, [...new Set(l.filter(mensal).map(h => h.ref))], sess.colab), assinados = new Set(as.map(a => a.holerite_id));
+  return `<div class="card">${l.length ? l.map(h => (mensal(h) && pend.has(h.ref))
       ? `<button class="item" onclick="irParaFolha('${h.ref}');toast('Assine a folha de ${refLabel(h.ref)} para abrir o holerite.')">
-      <div><div class="t">🔒 ${refLabel(h.ref)}</div><div class="d" style="color:var(--amber)">Assine a folha de ponto para abrir</div></div><span class="chev">${sv(IC.chev)}</span></button>`
+      <div><div class="t">🔒 ${esc(nomeHol(h))}</div><div class="d" style="color:var(--amber)">Assine a folha de ponto para abrir</div></div><span class="chev">${sv(IC.chev)}</span></button>`
       : `<button class="item" onclick="verHolerite(${h.id})">
-      <div><div class="t">${refLabel(h.ref)}</div><div class="d">Líquido ${BRL(totais(h).l)} · ${assinados.has(h.id) ? '<span style="color:var(--green)">✓ assinado</span>' : '<span style="color:var(--amber)">falta assinar</span>'}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('')
+      <div><div class="t">${esc(nomeHol(h))}</div><div class="d">Líquido ${BRL(totais(h).l)} · ${assinados.has(h.id) ? '<span style="color:var(--green)">✓ assinado</span>' : '<span style="color:var(--amber)">falta assinar</span>'}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('')
     : '<div class="empty">Nenhum holerite disponível ainda.</div>'}</div>`;
 }
 async function verHolerite(id) {
@@ -637,10 +637,10 @@ async function verHolerite(id) {
   try {
     const [h, ass] = await Promise.all([q(sb.from('holerites').select('*').eq('id', id).single()), q(sb.from('assinaturas_holerite').select('*').eq('holerite_id', id).maybeSingle())]);
     const c = sess.tipo === 'colab' ? sess.colab : (cacheEquipe.find(x => x.id === h.colaborador_id) || {});
-    if (sess.tipo === 'colab' && (await folhasPendentes(c.id, [h.ref], c)).has(h.ref)) { irParaFolha(h.ref); return toast(`Assine a folha de ${refLabel(h.ref)} para abrir o holerite.`); }
+    if (sess.tipo === 'colab' && mensal(h) && (await folhasPendentes(c.id, [h.ref], c)).has(h.ref)) { irParaFolha(h.ref); return toast(`Assine a folha de ${refLabel(h.ref)} para abrir o holerite.`); }
     const assinar = sess.tipo === 'colab' && !ass;
     document.body.classList.add('imprimindo-sheet');
-    sheet(`Holerite · ${refLabel(h.ref)}`, holeriteHTML(h, c, ass) + (assinar ? `<div class="card no-print" id="assinarHol" style="border-color:#f1d59a;margin-top:14px"><div class="card-b">
+    sheet(`Holerite · ${esc(nomeHol(h))}`, holeriteHTML(h, c, ass) + (assinar ? `<div class="card no-print" id="assinarHol" style="border-color:#f1d59a;margin-top:14px"><div class="card-b">
         <div style="font-weight:600;margin-bottom:4px">Assinar o recebimento</div>
         <div class="muted" style="margin-bottom:10px">Ao assinar, você declara que recebeu o valor líquido deste holerite.</div>
         ${padHTML('padHol')}
@@ -783,7 +783,7 @@ async function verColab(id, refSel) {
   sheetCarregando(esc(c.nome));
   try {
     const [hs, confs, cod, as, regs, pends] = await Promise.all([
-      q(sb.from('holerites').select('id,ref,itens').eq('colaborador_id', id).order('ref', {ascending:false})),
+      q(sb.from('holerites').select('*').eq('colaborador_id', id).order('ref', {ascending:false})).then(l => l.sort(ordHol)),
       q(sb.from('confirmacoes').select('ref,confirmado_em').eq('colaborador_id', id)),
       c.user_id ? Promise.resolve(null) : q(sb.rpc('codigo_acesso', {p_colab: id})),
       q(sb.from('assinaturas_holerite').select('holerite_id,assinado_em').eq('colaborador_id', id)),
@@ -792,7 +792,7 @@ async function verColab(id, refSel) {
     ]);
     colabAberto = {id, ref};
     const assDe = hid => as.find(a => a.holerite_id === hid);
-    const tem = temFolha(c, ref, regs), r = resumoColab(c, ref, regs), T = r.T, cf = confs.find(x => x.ref === ref), hRef = hs.find(h => h.ref === ref);
+    const tem = temFolha(c, ref, regs), r = resumoColab(c, ref, regs), T = r.T, cf = confs.find(x => x.ref === ref), hRef = hs.find(h => h.ref === ref && mensal(h));
     const kpi = (lb, v, cls = '') => `<div><small>${lb}</small><b class="${cls}">${v}</b></div>`;
     const statusFolha = !tem ? `<span class="tag t-neutral">Folha não lançada</span>`
       : cf ? `<span class="tag t-ok">✓ Assinada em ${dataHora(cf.confirmado_em)}</span>`
@@ -841,8 +841,8 @@ async function verColab(id, refSel) {
             <div class="cx-acoes"><button class="btn btn-primary btn-sm" onclick="editarHolerite(${hRef.id})">Abrir / editar</button>${assDe(hRef.id) ? `<button class="btn btn-ghost btn-sm" onclick="verHolerite(${hRef.id})">Ver assinado</button>` : ''}</div>`
           : `<div class="muted" style="margin:6px 0 4px">Ainda não há holerite deste mês.</div>
             <div class="cx-acoes"><button class="btn btn-primary btn-sm" onclick="abrirGerador('${id}','${ref}')">Calcular pela folha</button><button class="btn btn-ghost btn-sm" onclick="editarHolerite(null,'${id}')">Lançar à mão</button></div>`}
-          ${hs.filter(h => h.ref !== ref).length ? `<div class="cx-sub">Outros meses</div>
-            ${hs.filter(h => h.ref !== ref).slice(0, 6).map(h => `<button class="cx-mini" onclick="editarHolerite(${h.id})"><span>${refLabel(h.ref)}</span><span>${BRL(totais(h).l)} ${assDe(h.id) ? '<i class="ok">✓</i>' : '<i class="pend">•</i>'}</span></button>`).join('')}` : ''}
+          ${hs.filter(h => h !== hRef).length ? `<div class="cx-sub">Outros holerites</div>
+            ${hs.filter(h => h !== hRef).slice(0, 8).map(h => `<button class="cx-mini" onclick="editarHolerite(${h.id})"><span>${esc(nomeHol(h))}</span><span>${BRL(totais(h).l)} ${assDe(h.id) ? '<i class="ok">✓</i>' : '<i class="pend">•</i>'}</span></button>`).join('')}` : ''}
         </div></div>
 
         <div class="card cx-card"><div class="card-b">
@@ -1075,15 +1075,30 @@ async function verFolhaRH(id, ref) {
 }
 
 /* ---- holerites ---- */
+// Tipos de holerite: o mensal e os avulsos (13º, férias...) podem existir no mesmo mês
+const TIPOS_HOL = ['Mensal', '13º salário · 1ª parcela', '13º salário · 2ª parcela', 'Férias', 'Adiantamento', 'Rescisão'];
+const tipoHol = h => (h && h.tipo) || 'Mensal';
+const mensal = h => tipoHol(h) === 'Mensal';
+const nomeHol = h => mensal(h) ? refLabel(h.ref) : `${tipoHol(h)} · ${refLabel(h.ref)}`;
+const ordHol = (a, b) => b.ref.localeCompare(a.ref) || TIPOS_HOL.indexOf(tipoHol(a)) - TIPOS_HOL.indexOf(tipoHol(b));
+function lerTipoHol(v) {
+  const t = semAcento(String(v || '')).replace(/[ºª°]/g, '');
+  if (!t || t.startsWith('mens')) return 'Mensal';
+  if (t.includes('13') || t.includes('decimo')) return /(^|\D)2(\D|$)|segunda|final/.test(t.replace('13', '')) ? TIPOS_HOL[2] : TIPOS_HOL[1];
+  if (t.startsWith('feri')) return 'Férias';
+  if (t.startsWith('adiant')) return 'Adiantamento';
+  if (t.startsWith('rescis')) return 'Rescisão';
+  return null;
+}
 async function vRhHol() {
-  const [l] = await Promise.all([q(sb.from('holerites').select('id,colaborador_id,ref,itens').order('ref', {ascending:false}).limit(500)), carregarEquipe()]);
+  const [l] = await Promise.all([q(sb.from('holerites').select('*').order('ref', {ascending:false}).limit(1000)), carregarEquipe()]);
   const grupos = {};
   const mt = mesTrab();
-  l.sort((a, b) => b.ref.localeCompare(a.ref) || nomeDe(a.colaborador_id).localeCompare(nomeDe(b.colaborador_id))).filter(h => holTodos || h.ref === mt).forEach(h => (grupos[h.ref] = grupos[h.ref] || []).push(h));
+  l.sort((a, b) => ordHol(a, b) || nomeDe(a.colaborador_id).localeCompare(nomeDe(b.colaborador_id))).filter(h => holTodos || h.ref === mt).forEach(h => (grupos[h.ref] = grupos[h.ref] || []).push(h));
   const outros = l.filter(h => h.ref !== mt).length;
   return `${barraMesRH()}<div class="stack" style="margin-bottom:14px"><button class="btn btn-primary" onclick="abrirImportacao()">Importar holerites (Excel)</button><button class="btn btn-ghost" onclick="editarHolerite()">${sv(IC.plus, 18)} Lançar holerite à mão</button></div>
   ${Object.keys(grupos).length ? Object.keys(grupos).map(ref => `<div class="sec-t">${refLabel(ref)}</div><div class="card">${grupos[ref].map(h => `<button class="item" onclick="editarHolerite(${h.id})">
-    <div class="av">${esc(ini(nomeDe(h.colaborador_id)))}</div><div><div class="t">${esc(nomeDe(h.colaborador_id))}</div><div class="d">Líquido ${BRL(totais(h).l)}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('')}</div>`).join('')
+    <div class="av">${esc(ini(nomeDe(h.colaborador_id)))}</div><div><div class="t">${esc(nomeDe(h.colaborador_id))}</div><div class="d">${mensal(h) ? '' : `<span class="tag t-info">${esc(tipoHol(h))}</span> `}Líquido ${BRL(totais(h).l)}</div></div><span class="chev">${sv(IC.chev)}</span></button>`).join('')}</div>`).join('')
   : `<div class="card"><div class="empty">Nenhum holerite lançado em ${refLabel(mt)}.</div></div>`}
   ${outros || holTodos ? `<button class="btn btn-ghost" style="margin-top:12px;width:100%" onclick="holTodos=!holTodos;render()">${holTodos ? 'Mostrar só ' + refLabel(mt) : 'Ver holerites de todos os meses (' + outros + ')'}</button>` : ''}`;
 }
@@ -1178,7 +1193,7 @@ async function calcularPelaFolha(colabId, hid, btn) {
     try {
       const [regs, ex] = await Promise.all([
         q(sb.from('pontos').select('dia,marcacoes,ocorrencia,observacao').eq('colaborador_id', colabId).gte('dia', ref + '-01').lte('dia', fimDoMes(ref))),
-        q(sb.from('holerites').select('id,obs').eq('colaborador_id', colabId).eq('ref', ref).maybeSingle())]);
+        q(sb.from('holerites').select('*').eq('colaborador_id', colabId).eq('ref', ref)).then(l => l.find(mensal) || null)]);
       if (!temFolha(c, ref, regs)) { e.textContent = `Não há folha de ponto em ${refLabel(ref)}. Preencha a folha primeiro.`; return e.classList.remove('hide'); }
       const g = gerarHolerite(c, ref, regs, {dependentes: dep, adiantamento: adiant});
       const id = hid || (ex && ex.id) || 0;
@@ -1208,7 +1223,7 @@ async function editarHolerite(hid, colabId) {
   // Holerite anterior serve de modelo (mesmos códigos e descrições)
   let modelo = null;
   if (!h) { try { modelo = (await q(sb.from('holerites').select('itens').eq('colaborador_id', cid).order('ref', {ascending:false}).limit(1)))[0]; } catch (e) {} }
-  rascunho = {id: hid || 0, colabId: cid, ref: h ? h.ref : mesTrab(), obs: h ? (h.obs || '') : '',
+  rascunho = {id: hid || 0, colabId: cid, ref: h ? h.ref : mesTrab(), tipo: tipoHol(h), tipoOrig: h ? tipoHol(h) : 'Mensal', obs: h ? (h.obs || '') : '',
     itens: h ? JSON.parse(JSON.stringify(h.itens)) : modelo ? modelo.itens.map(i => ({...i, valor: i.codigo === '1' ? sal : '', ref: i.codigo === '1' ? i.ref : ''})) : ITENS_PADRAO(sal),
     rodape: h ? {...(h.rodape || {})} : {salario_base: sal}};
   desenharHolerite();
@@ -1223,10 +1238,11 @@ function desenharHolerite() {
   const r = rascunho, t = totais(r);
   sheet(r.id ? 'Editar holerite' : 'Lançar holerite', `
     <div class="field"><label for="hC">Colaborador</label><select id="hC" ${r.id ? 'disabled' : ''} onchange="trocarColabHol(this.value)">${cacheEquipe.map(c => `<option value="${c.id}" ${c.id === r.colabId ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></div>
-    <div class="field"><label for="hR">Mês de referência</label><input id="hR" type="month" value="${r.ref}" onchange="rascunho.ref=this.value"></div>
+    <div class="row2"><div class="field"><label for="hR">Mês de referência</label><input id="hR" type="month" value="${r.ref}" onchange="rascunho.ref=this.value"></div>
+    <div class="field"><label for="hT">Tipo</label><select id="hT" onchange="rascunho.tipo=this.value;$('hCalc').style.display=this.value==='Mensal'?'':'none'">${TIPOS_HOL.map(t => `<option ${t === (r.tipo || 'Mensal') ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
     ${r.id ? `<div id="hAss" class="muted" style="margin:-4px 0 10px"></div>` : ''}
     ${notaCalculo(r.calc)}
-    <button class="btn btn-ghost btn-sm" style="margin-bottom:6px" onclick="abrirGerador(rascunho.colabId, rascunho.ref, rascunho.id)">Calcular pela folha de ponto</button>
+    <button id="hCalc" class="btn btn-ghost btn-sm" style="margin-bottom:6px;${(r.tipo || 'Mensal') === 'Mensal' ? '' : 'display:none'}" onclick="abrirGerador(rascunho.colabId, rascunho.ref, rascunho.id)">Calcular pela folha de ponto</button>
     <div class="sec-t">Verbas (código · descrição · referência · valor)</div>
     ${r.itens.map((i, k) => `<div class="hl-line">
       <input aria-label="Código" placeholder="Cód." inputmode="numeric" value="${esc(i.codigo || '')}" oninput="rascunho.itens[${k}].codigo=this.value">
@@ -1267,7 +1283,7 @@ function calcRodape() {
 function previaHolerite() {
   const c = cacheEquipe.find(x => x.id === rascunho.colabId) || {};
   const h = {...rascunho, itens: rascunho.itens.filter(i => i.desc || +i.valor)};
-  sheet(`Prévia · ${refLabel(h.ref)}`, holeriteHTML(h, c), [['Voltar e editar', 'primary', 'desenharHolerite()']]);
+  sheet(`Prévia · ${esc(nomeHol(h))}`, holeriteHTML(h, c), [['Voltar e editar', 'primary', 'desenharHolerite()']]);
 }
 const totHTML = t => `<div class="kv"><span>Total de vencimentos</span><span>${BRL(t.p)}</span></div><div class="kv"><span>Total de descontos</span><span>${BRL(t.d)}</span></div><div class="tot-row"><span>Valor líquido</span><span>${BRL(t.l)}</span></div>`;
 function atualizarTot() { $('hTot').innerHTML = totHTML(totais(rascunho)); }
@@ -1280,9 +1296,10 @@ async function salvarHolerite(btn) {
   const rodape = {}; RODAPE.forEach(([k]) => { const v = r.rodape[k]; if (v !== '' && v != null) rodape[k] = Math.round(+v * 100) / 100; });
   await comBotao(btn, async () => {
     try {
-      if (r.id) await q(sb.from('holerites').update({ref: r.ref, itens, rodape, obs: r.obs || null}).eq('id', r.id));
-      else await q(sb.from('holerites').insert({colaborador_id: r.colabId, ref: r.ref, itens, rodape, obs: r.obs || null}));
-      fecharSheet(); render(); toast(`Holerite de ${refLabel(r.ref)} salvo para ${primeiro(nomeDe(r.colabId))}.`);
+      const tipo = r.tipo || 'Mensal', comTipo = tipo !== 'Mensal' || tipo !== (r.tipoOrig || 'Mensal') ? {tipo} : {};
+      if (r.id) await q(sb.from('holerites').update({ref: r.ref, ...comTipo, itens, rodape, obs: r.obs || null}).eq('id', r.id));
+      else await q(sb.from('holerites').insert({colaborador_id: r.colabId, ref: r.ref, ...comTipo, itens, rodape, obs: r.obs || null}));
+      fecharSheet(); render(); toast(`Holerite ${tipo === 'Mensal' ? '' : '(' + tipo + ') '}de ${refLabel(r.ref)} salvo para ${primeiro(nomeDe(r.colabId))}.`);
     } catch (x) { erro(erroMsg(x)); }
   });
 }
@@ -1385,8 +1402,8 @@ function carregarXLSX() {
 const ABAS = {
   colab: ['CPF', 'Nome', 'Código', 'Cargo', 'Obra', 'CBO', 'Departamento', 'Filial', 'Centro de custo', 'CC holerite', 'Tipo', 'Admissão', 'Salário', 'Dependentes', 'E-mail', 'Telefone', 'Banco', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom', 'Situação', 'Desligamento'],
   ponto: ['CPF', 'Data', 'Entrada', 'Saída almoço', 'Retorno almoço', 'Saída', 'Ocorrência', 'Observação'],
-  hol: ['CPF', 'Mês', 'Código', 'Descrição', 'Referência', 'Vencimento', 'Desconto'],
-  bases: ['CPF', 'Mês', 'Salário base', 'Sal. contr. INSS', 'Base cálc. FGTS', 'FGTS do mês', 'Base cálc. IRRF', 'Faixa IRRF']
+  hol: ['CPF', 'Mês', 'Código', 'Descrição', 'Referência', 'Vencimento', 'Desconto', 'Tipo'],
+  bases: ['CPF', 'Mês', 'Salário base', 'Sal. contr. INSS', 'Base cálc. FGTS', 'FGTS do mês', 'Base cálc. IRRF', 'Faixa IRRF', 'Tipo']
 };
 const NOMES_ABAS = {colab: 'Colaboradores', ponto: 'Ponto', hol: 'Holerites', bases: 'Bases holerite'};
 function modeloPlanilha() {
@@ -1401,7 +1418,7 @@ function modeloPlanilha() {
       ['Ponto', 'Um dia por linha. Data no formato dd/mm/aaaa e horários no formato 07:00.'],
       ['', 'Ocorrência (opcional): Feriado, Sem expediente, Folga, Atestado, Abonado, Férias ou Falta.'],
       ['', 'Se o colaborador já tinha assinado a folha do mês, ele precisará assinar de novo.'],
-      ['Holerites', 'Uma verba por linha (mesmo CPF e mês = mesmo holerite). Preencha Vencimento OU Desconto. Mês no formato mm/aaaa.'],
+      ['Holerites', 'Uma verba por linha (mesmo CPF, mês e tipo = mesmo holerite). Preencha Vencimento OU Desconto. Mês no formato mm/aaaa. Tipo (opcional): em branco = Mensal; ou 13º 1ª parcela, 13º 2ª parcela, Férias, Adiantamento, Rescisão.'],
       ['', 'Importar de novo o mesmo CPF e mês substitui o holerite inteiro.'],
       ['Bases holerite', 'Opcional: rodapé do holerite (uma linha por CPF e mês).']],
     Colaboradores: [ABAS.colab,
@@ -1590,15 +1607,17 @@ async function lerPlanilha(arq) {
       if (Number.isNaN(ve) || Number.isNaN(de)) { E('Holerites', n, 'valor inválido'); continue; }
       if (!v['Descrição']) { E('Holerites', n, 'descrição obrigatória'); continue; }
       if ((ve || 0) && (de || 0)) { E('Holerites', n, 'preencha vencimento OU desconto, não os dois'); continue; }
-      const k = cpf + '|' + ref; (hols[k] = hols[k] || []).push({codigo: String(v['Código']), desc: String(v['Descrição']), ref: typeof v['Referência'] === 'number' ? num(v['Referência']) : String(v['Referência']), tipo: de ? 'd' : 'p', valor: de || ve || 0});
+      const th = lerTipoHol(v.Tipo); if (!th) { E('Holerites', n, 'tipo inválido (use Mensal, 13º 1ª parcela, 13º 2ª parcela, Férias, Adiantamento ou Rescisão)'); continue; }
+      const k = cpf + '|' + ref + '|' + th; (hols[k] = hols[k] || []).push({codigo: String(v['Código']), desc: String(v['Descrição']), ref: typeof v['Referência'] === 'number' ? num(v['Referência']) : String(v['Referência']), tipo: de ? 'd' : 'p', valor: de || ve || 0});
     }
     for (const {n, v} of linhasDaAba(X, wb, 'bases')) {
       const cpf = lerCPF(v.CPF), ref = lerMes(v['Mês']);
       if (!existe(cpf) || !ref) { E('Bases holerite', n, 'CPF não cadastrado ou mês inválido'); continue; }
       const r = {}; [['Salário base', 'salario_base'], ['Sal. contr. INSS', 'sal_contr_inss'], ['Base cálc. FGTS', 'base_fgts'], ['FGTS do mês', 'fgts_mes'], ['Base cálc. IRRF', 'base_irrf'], ['Faixa IRRF', 'faixa_irrf']]
         .forEach(([h, k]) => { const x = lerValor(v[h]); if (x != null && !Number.isNaN(x)) r[k] = x; });
-      bases[cpf + '|' + ref] = r;
-      if (!hols[cpf + '|' + ref]) E('Bases holerite', n, 'não há verbas para este CPF e mês na aba Holerites');
+      const kb = cpf + '|' + ref + '|' + (lerTipoHol(v.Tipo) || 'Mensal');
+      bases[kb] = r;
+      if (!hols[kb]) E('Bases holerite', n, 'não há verbas para este CPF e mês na aba Holerites');
     }
     plano = {novos, atualiza, pontos, hols, bases};
     const nh = Object.keys(hols).length, meses = [...new Set(pontos.map(p => p.dia.slice(0, 7)))].map(refLabel).join(', ');
@@ -1627,8 +1646,15 @@ async function executarImportacao(btn) {
         const afetados = [...new Set(linhas.map(l => l.colaborador_id + '|' + l.dia.slice(0, 7)))];
         for (const k of afetados) { const [cid, ref] = k.split('|'); await q(sb.from('confirmacoes').delete().eq('colaborador_id', cid).eq('ref', ref)); }
       }
-      const hl = Object.keys(hols).map(k => { const [cpf, ref] = k.split('|'); return {colaborador_id: idDe[cpf], ref, itens: hols[k], rodape: bases[k] || {}}; });
-      if (hl.length) await q(sb.from('holerites').upsert(hl, {onConflict: 'colaborador_id,ref'}));
+      const hl = Object.keys(hols).map(k => { const [cpf, ref, tipo] = k.split('|'); return {colaborador_id: idDe[cpf], ref, tipo, itens: hols[k], rodape: bases[k] || {}}; });
+      if (hl.length) {
+        try { await q(sb.from('holerites').upsert(hl, {onConflict: 'colaborador_id,ref,tipo'})); }
+        catch (x) {
+          // Banco ainda sem a coluna "tipo" (falta rodar supabase/tipo-holerite.sql): só dá para importar holerites mensais
+          if (hl.some(h => h.tipo !== 'Mensal')) throw new Error('Para importar holerite de 13º, férias etc., rode antes o arquivo supabase/tipo-holerite.sql no Supabase.');
+          await q(sb.from('holerites').upsert(hl.map(({tipo, ...h}) => h), {onConflict: 'colaborador_id,ref'}));
+        }
+      }
       fecharSheet(); render();
       toast(`Importação concluída: ${novos.length} novo(s), ${atualiza.length} atualizado(s), ${pontos.length} dia(s) de ponto, ${hl.length} holerite(s).`);
     } catch (e) { toast(erroMsg(e)); }
